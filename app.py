@@ -19,11 +19,11 @@ GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-# קובץ הנתונים המקומי (שומר את הנתונים בזמן אמת)
+# קובץ הנתונים המקומי
 DB_FILE = "properties_db.json"
 
 # ==========================================
-# 2. ניהול בסיס הנתונים (מחיקה, שמירה, טעינה)
+# 2. ניהול בסיס הנתונים
 # ==========================================
 def load_data():
     if os.path.exists(DB_FILE):
@@ -43,7 +43,7 @@ if "properties" not in st.session_state:
 # ==========================================
 SYSTEM_INSTRUCTION = """
 אתה מומחה נדל"ן ומעריך נכסים ביוון. תפקידך לחלץ מודעת נדל"ן (מטקסט, קישור או תמונות/צילומי מסך) ולהחזיר אך ורק אובייקט JSON תקני ללא טקסט מעבר לכך.
-אם מועלות כמה תמונות, חבר את המידע מכל התמונות יחד לכדי ניתוח של נכס אחד.
+אם מועלות שתי תמונות, חבר את המידע מכל התמונות יחד לכדי ניתוח של נכס אחד.
 
 השדות ב-JSON חייבים להיות:
 {
@@ -77,11 +77,11 @@ def analyze_with_gemini(user_text=None, image_files=None):
     
     contents = []
     
-    # במידה והועלו תמונות (אחת או יותר)
     if image_files:
         for img_file in image_files:
-            img = Image.open(img_file)
-            contents.append(img)
+            if img_file is not None:
+                img = Image.open(img_file)
+                contents.append(img)
             
     if user_text:
         contents.append(user_text)
@@ -93,7 +93,7 @@ def analyze_with_gemini(user_text=None, image_files=None):
 # 4. ממשק המשתמש (UI)
 # ==========================================
 st.title("🏠 מנוע השוואת נכסים ביוון - לוח משפחתי")
-st.caption("הוסיפו קישור או צילום מסך של מודעה, וה-AI יחלץ את הנתונים וידרג אותה אוטומטית.")
+st.caption("הוסיפו צילומי מסך או טקסט של מודעה, וה-AI יחלץ את הנתונים וידרג אותה אוטומטית.")
 
 # --- אזור הוספת נכס חדש ---
 with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=True):
@@ -102,32 +102,43 @@ with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=
     with col_input1:
         added_by = st.selectbox("שם בן המשפחה המוסיף:", ["דודי", "גל", "מאיר/פזית", "אחר"])
         property_url = st.text_input("קישור למודעה / פוסט (אופציונלי):")
-        property_text = st.text_area("טקסט המודעה / הערות נוספות:")
+        property_text = st.text_area("טקסט המודעה / הערות נוספות:", placeholder="הדבק כאן טקסט במידת הצורך...")
         
     with col_input2:
-        # תמיכה בהעלאת מרובת קבצים (Multiple Upload)
-        uploaded_images = st.file_uploader(
-            "העלה צילומי מסך של המודעה (ניתן לבחור מספר תמונות):", 
+        # העלאת תמונה ראשונה
+        uploaded_image_1 = st.file_uploader(
+            "📷 צילום מסך 1 (חלק ראשי של המודעה):", 
             type=["jpg", "jpeg", "png"],
-            accept_multiple_files=True
+            key="img1"
         )
+        if uploaded_image_1 is not None:
+            st.success(f"✔️ תמונה 1 נטענה: {uploaded_image_1.name}")
+            st.image(uploaded_image_1, width=120)
+            
+        st.write("---")
         
-        # חיווי ויזואלי להעלאת קבצים
-        if uploaded_images:
-            st.success(f"📸 הועלו {len(uploaded_images)} תמונות בהצלחה!")
-            for img in uploaded_images:
-                st.caption(f"✔️ {img.name}")
+        # העלאת תמונה שנייה (אופציונלית - המשך המודעה)
+        uploaded_image_2 = st.file_uploader(
+            "📷 צילום מסך 2 (המשך המודעה - אופציונלי):", 
+            type=["jpg", "jpeg", "png"],
+            key="img2"
+        )
+        if uploaded_image_2 is not None:
+            st.success(f"✔️ תמונה 2 נטענה: {uploaded_image_2.name}")
+            st.image(uploaded_image_2, width=120)
         
+    # איסוף התמונות שהועלו לרשימה
+    images_to_process = [img for img in [uploaded_image_1, uploaded_image_2] if img is not None]
+
     if st.button("🚀 נתח והוסף נכס ללוח", use_container_width=True):
-        if not property_text and not uploaded_images and not property_url:
-            st.error("יש לספק לפחות תמונה, טקסט או קישור למודעה.")
+        if not property_text and not images_to_process and not property_url:
+            st.error("יש לספק לפחות צילום מסך אחד, טקסט או קישור למודעה.")
         else:
-            with st.spinner("מנוע ה-AI מנתח את כל התמונות והנתונים ומחשב ניקוד..."):
+            with st.spinner("מנוע ה-AI מנתח את התמונות והנתונים ומחשב ניקוד..."):
                 try:
                     combined_text = f"URL: {property_url}\n{property_text}" if property_url else property_text
-                    parsed_data = analyze_with_gemini(user_text=combined_text, image_files=uploaded_images)
+                    parsed_data = analyze_with_gemini(user_text=combined_text, image_files=images_to_process)
                     
-                    # הוספת מזהה ייחודי ושם המוסיף
                     parsed_data["id"] = len(st.session_state.properties) + 1
                     parsed_data["added_by"] = added_by
                     parsed_data["url"] = property_url if property_url else "N/A"
@@ -149,13 +160,9 @@ st.subheader("📋 טבלת השוואת נכסים (ממוינת לפי ציו�
 if not st.session_state.properties:
     st.info("עדיין לא הוספו נכסים. השתמשו בטופס למעלה כדי להוסיף את הנכס הראשון!")
 else:
-    # המרת הנתונים ל-DataFrame של Pandas
     df = pd.DataFrame(st.session_state.properties)
-    
-    # מיון לפי ציון משוקלל יורד
     df = df.sort_values(by="total_score", ascending=False)
     
-    # כפתור ייצוא לאקסל
     excel_file = "greece_properties_comparison.xlsx"
     df.to_excel(excel_file, index=False)
     with open(excel_file, "rb") as f:
@@ -166,7 +173,6 @@ else:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
     
-    # תצוגת הכרטיסיות/שורות בטבלה
     for idx, row in df.iterrows():
         with st.container(border=True):
             col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
@@ -192,7 +198,6 @@ else:
             with col4:
                 st.write("")
                 st.write("")
-                # כפתור מחיקה
                 if st.button("🗑️ מחק", key=f"del_{row['id']}"):
                     st.session_state.properties = [p for p in st.session_state.properties if p["id"] != row["id"]]
                     save_data(st.session_state.properties)

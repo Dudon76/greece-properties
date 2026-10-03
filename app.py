@@ -14,9 +14,10 @@ st.set_page_config(
     layout="wide"
 )
 
-# הגדרת מפתח ה-API של Gemini (ניתן להגדיר גם ב-Environment Variable)
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY_HERE")
-genai.configure(api_key=GEMINI_API_KEY)
+# שליפת מפתח ה-API מתוך ה-Secrets של Streamlit
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 # קובץ הנתונים המקומי (שומר את הנתונים בזמן אמת)
 DB_FILE = "properties_db.json"
@@ -41,7 +42,9 @@ if "properties" not in st.session_state:
 # 3. מנוע AI לחילוץ נתונים מ-Gemini
 # ==========================================
 SYSTEM_INSTRUCTION = """
-אתה מומחה נדל"ן ומעריך נכסים ביוון. תפקידך לחלץ מודעת נדל"ן (מטקסט, קישור או תמונה) ולהחזיר אך ורק אובייקט JSON תקני ללא טקסט מעבר לכך.
+אתה מומחה נדל"ן ומעריך נכסים ביוון. תפקידך לחלץ מודעת נדל"ן (מטקסט, קישור או תמונות/צילומי מסך) ולהחזיר אך ורק אובייקט JSON תקני ללא טקסט מעבר לכך.
+אם מועלות כמה תמונות, חבר את המידע מכל התמונות יחד לכדי ניתוח של נכס אחד.
+
 השדות ב-JSON חייבים להיות:
 {
   "property_title": "כותרת קצרה",
@@ -65,7 +68,7 @@ SYSTEM_INSTRUCTION = """
 total_score = (0.4 * physical_score) + (0.3 * location_score) + (0.3 * airbnb_score)
 """
 
-def analyze_with_gemini(user_text=None, image_file=None):
+def analyze_with_gemini(user_text=None, image_files=None):
     model = genai.GenerativeModel(
         model_name="gemini-3.8-flash",
         system_instruction=SYSTEM_INSTRUCTION,
@@ -73,9 +76,13 @@ def analyze_with_gemini(user_text=None, image_file=None):
     )
     
     contents = []
-    if image_file:
-        img = Image.open(image_file)
-        contents.append(img)
+    
+    # במידה והועלו תמונות (אחת או יותר)
+    if image_files:
+        for img_file in image_files:
+            img = Image.open(img_file)
+            contents.append(img)
+            
     if user_text:
         contents.append(user_text)
         
@@ -98,16 +105,27 @@ with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=
         property_text = st.text_area("טקסט המודעה / הערות נוספות:")
         
     with col_input2:
-        uploaded_image = st.file_uploader("העלה צילום מסך של המודעה (תמונה):", type=["jpg", "jpeg", "png"])
+        # תמיכה בהעלאת מרובת קבצים (Multiple Upload)
+        uploaded_images = st.file_uploader(
+            "העלה צילומי מסך של המודעה (ניתן לבחור מספר תמונות):", 
+            type=["jpg", "jpeg", "png"],
+            accept_multiple_files=True
+        )
+        
+        # חיווי ויזואלי להעלאת קבצים
+        if uploaded_images:
+            st.success(f"📸 הועלו {len(uploaded_images)} תמונות בהצלחה!")
+            for img in uploaded_images:
+                st.caption(f"✔️ {img.name}")
         
     if st.button("🚀 נתח והוסף נכס ללוח", use_container_width=True):
-        if not property_text and not uploaded_image and not property_url:
+        if not property_text and not uploaded_images and not property_url:
             st.error("יש לספק לפחות תמונה, טקסט או קישור למודעה.")
         else:
-            with st.spinner("מנוע ה-AI מנתח את הנכס ומחשב ניקוד..."):
+            with st.spinner("מנוע ה-AI מנתח את כל התמונות והנתונים ומחשב ניקוד..."):
                 try:
                     combined_text = f"URL: {property_url}\n{property_text}" if property_url else property_text
-                    parsed_data = analyze_with_gemini(user_text=combined_text, image_file=uploaded_image)
+                    parsed_data = analyze_with_gemini(user_text=combined_text, image_files=uploaded_images)
                     
                     # הוספת מזהה ייחודי ושם המוסיף
                     parsed_data["id"] = len(st.session_state.properties) + 1

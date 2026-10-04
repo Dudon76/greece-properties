@@ -1,10 +1,10 @@
 import os
 import json
+import sqlite3
 import streamlit as st
 import pandas as pd
 from PIL import Image
 import google.generativeai as genai
-from supabase import create_client, Client
 
 # ==========================================
 # 1. הגדרות בסיסיות ותצורת עמוד
@@ -15,44 +15,54 @@ st.set_page_config(
     layout="wide"
 )
 
-# שליפת מפתחות API מתוך ה-Secrets
+# שליפת מפתח ה-API מתוך ה-Secrets
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-SUPABASE_URL = st.secrets.get("SUPABASE_URL", "")
-SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", "")
+# ==========================================
+# בסיס נתונים SQLite מקומי ופשוט
+# ==========================================
+DB_FILE = "properties_db.sqlite"
 
-@st.cache_resource
-def init_supabase() -> Client:
-    if SUPABASE_URL and SUPABASE_KEY:
-        return create_client(SUPABASE_URL, SUPABASE_KEY)
-    return None
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS properties (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            data TEXT NOT NULL
+        )
+    ''')
+    conn.commit()
+    conn.close()
 
-supabase_client = init_supabase()
+init_db()
 
 def load_data():
-    if supabase_client:
-        try:
-            res = supabase_client.table("properties").select("*").execute()
-            records = [item["data"] for item in res.data if "data" in item]
-            return records
-        except Exception as e:
-            st.error(f"שגיאה בטעינת נתונים מ-Supabase: {e}")
-    if "local_db" not in st.session_state:
-        st.session_state.local_db = []
-    return st.session_state.local_db
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute("SELECT data FROM properties")
+        rows = c.fetchall()
+        conn.close()
+        records = [json.loads(r[0]) for r in rows]
+        return records
+    except Exception as e:
+        st.error(f"שגיאה שטעינת נתונים: {e}")
+        return []
 
 def save_data(data_list):
-    st.session_state.local_db = data_list
-    if supabase_client and data_list:
-        try:
-            # ניקוי ועדכון השורות בבסיס הנתונים
-            supabase_client.table("properties").delete().neq("id", -1).execute()
-            rows_to_insert = [{"data": prop} for prop in data_list]
-            supabase_client.table("properties").insert(rows_to_insert).execute()
-        except Exception as e:
-            st.error(f"שגיאה בשמירת נתונים ל-Supabase: {e}")
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute("DELETE FROM properties")
+        for prop in data_list:
+            c.execute("INSERT INTO properties (data) VALUES (?)", (json.dumps(prop, ensure_ascii=False),))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        st.error(f"שגיאה בשמירת נתונים: {e}")
 
 if "properties" not in st.session_state:
     st.session_state.properties = load_data()
@@ -139,7 +149,7 @@ with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=
         if not property_text and not images_to_process and not property_url:
             st.error("יש לספק לפחות צילום מסך אחד, טקסט או קישור למודעה.")
         else:
-            with st.spinner("מנוע ה-AI מנתח את הנתונים ושומר בענן..."):
+            with st.spinner("מנוע ה-AI מנתח את הנתונים..."):
                 try:
                     combined_text = f"URL: {property_url}\n{property_text}" if property_url else property_text
                     parsed_data = analyze_with_gemini(user_text=combined_text, image_files=images_to_process)
@@ -153,7 +163,7 @@ with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=
                     save_data(current_props)
                     
                     st.session_state.properties = current_props
-                    st.success(f"הנכס '{parsed_data['property_title']}' נשמר בהצלחה בענן!")
+                    st.success(f"הנכס '{parsed_data['property_title']}' נשמר בהצלחה!")
                     st.rerun()
                 except Exception as e:
                     st.error(f"שגיאה בניתוח המודעה: {e}")

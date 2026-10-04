@@ -20,6 +20,23 @@ GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
+# פונקציה ייעודית לתיקון וסניטציה של מפתח PEM / RSA
+def sanitize_private_key(raw_key: str) -> str:
+    if not raw_key:
+        return ""
+    # החלפת לוכסנים כפולים מילוליים בתו מעבר שורה אמיתי
+    key = raw_key.replace("\\n", "\n")
+    
+    # הסרת כותרות קיימות לצורך בנייה מחדש נקייה
+    key_body = key.replace("-----BEGIN PRIVATE KEY-----", "").replace("-----END PRIVATE KEY-----", "")
+    # ניקוי רווחים ושורות ריקות
+    key_lines = [line.strip() for line in key_body.splitlines() if line.strip()]
+    cleaned_body = "\n".join(key_lines)
+    
+    # הרכבה מחדש בפורמט PEM תקני
+    formatted_key = f"-----BEGIN PRIVATE KEY-----\n{cleaned_body}\n-----END PRIVATE KEY-----\n"
+    return formatted_key
+
 # חיבור בטוח ל-Google Sheets דרך gcp_service_account
 def get_gsheet():
     try:
@@ -29,6 +46,8 @@ def get_gsheet():
         
         if "gcp_service_account" in st.secrets:
             creds = dict(st.secrets["gcp_service_account"])
+            if "private_key" in creds:
+                creds["private_key"] = sanitize_private_key(creds["private_key"])
             gc = gspread.service_account_from_dict(creds)
         else:
             gc = gspread.public_credentials()
@@ -138,7 +157,7 @@ with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=
         
         uploaded_image_2 = st.file_uploader("📷 צילום מסך 2 (המשך המודעה - אופציונלי):", type=["jpg", "jpeg", "png"], key="img2")
         if uploaded_image_2 is not None:
-            st.success(f"✔️ תמונה 2 נטענה: {uploaded_image_2.name}")
+            st.success(f"✔️️ תמונה 2 נטענה: {uploaded_image_2.name}")
             st.image(uploaded_image_2, width=120)
         
     images_to_process = [img for img in [uploaded_image_1, uploaded_image_2] if img is not None]

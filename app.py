@@ -4,7 +4,7 @@ import streamlit as st
 import pandas as pd
 from PIL import Image
 import google.generativeai as genai
-from streamlit_gsheets import GSheetsConnection
+import gspread
 
 # ==========================================
 # 1. הגדרות בסיסיות ותצורת עמוד
@@ -20,21 +20,40 @@ GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-# חיבור ל-Google Sheets
-conn = st.connection("gsheets", type=GSheetsConnection)
+# חיבור ל-Google Sheets דרך gspread
+def get_gsheet():
+    try:
+        sheet_url = st.secrets.get("spreadsheet", "")
+        if not sheet_url:
+            return None
+        gc = gspread.public_credentials()
+        sh = gc.open_by_url(sheet_url)
+        return sh.sheet1
+    except Exception:
+        return None
 
 def load_data():
-    try:
-        df = conn.read(ttl=0)
-        if df.empty:
-            return []
-        return df.to_dict(orient="records")
-    except Exception:
-        return []
+    sheet = get_gsheet()
+    if sheet:
+        try:
+            records = sheet.get_all_records()
+            return records
+        except Exception:
+            pass
+    if "local_db" not in st.session_state:
+        st.session_state.local_db = []
+    return st.session_state.local_db
 
 def save_data(data_list):
-    df = pd.DataFrame(data_list)
-    conn.update(data=df)
+    st.session_state.local_db = data_list
+    sheet = get_gsheet()
+    if sheet and data_list:
+        try:
+            df = pd.DataFrame(data_list)
+            sheet.clear()
+            sheet.update([df.columns.values.tolist()] + df.values.tolist())
+        except Exception:
+            pass
 
 if "properties" not in st.session_state:
     st.session_state.properties = load_data()
@@ -121,12 +140,11 @@ with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=
         if not property_text and not images_to_process and not property_url:
             st.error("יש לספק לפחות צילום מסך אחד, טקסט או קישור למודעה.")
         else:
-            with st.spinner("מנוע ה-AI מנתח את הנתונים ושומר ב-Google Sheets..."):
+            with st.spinner("מנוע ה-AI מנתח את הנתונים ושומר בלוח..."):
                 try:
                     combined_text = f"URL: {property_url}\n{property_text}" if property_url else property_text
                     parsed_data = analyze_with_gemini(user_text=combined_text, image_files=images_to_process)
                     
-                    # רשימת הנתונים העדכנית
                     current_props = load_data()
                     parsed_data["id"] = len(current_props) + 1
                     parsed_data["added_by"] = added_by
@@ -136,7 +154,7 @@ with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=
                     save_data(current_props)
                     
                     st.session_state.properties = current_props
-                    st.success(f"הנכס '{parsed_data['property_title']}' נשמר בהצלחה ב-Google Sheets!")
+                    st.success(f"הנכס '{parsed_data['property_title']}' נשמר בהצלחה!")
                     st.rerun()
                 except Exception as e:
                     st.error(f"שגיאה בניתוח המודעה: {e}")
@@ -148,14 +166,14 @@ st.divider()
 # ==========================================
 st.subheader("📋 טבלת השוואת נכסים (ממוינת לפי ציון משוקלל)")
 
-# טעינת נתונים עדכנית ישירות מ-Google Sheets
 st.session_state.properties = load_data()
 
 if not st.session_state.properties:
     st.info("עדיין לא הוספו נכסים. השתמשו בטופס למעלה כדי להוסיף את הנכס הראשון!")
 else:
     df = pd.DataFrame(st.session_state.properties)
-    df = df.sort_values(by="total_score", ascending=False)
+    if "total_score" in df.columns:
+        df = df.sort_values(by="total_score", ascending=False)
     
     excel_file = "greece_properties_comparison.xlsx"
     df.to_excel(excel_file, index=False)
@@ -172,28 +190,29 @@ else:
             col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
             
             with col1:
-                st.markdown(f"### **{row['property_title']}**")
-                st.write(f"📍 **מיקום:** {row['region']}, {row['city_town']} ({row['village']})")
-                st.write(f"📝 **תקציר:** {row['summary']}")
-                st.write(f"👤 **התווסף ע\"י:** {row['added_by']}")
+                st.markdown(f"### **{row.get('property_title', 'נכס')}**")
+                st.write(f"📍 **מיקום:** {row.get('region', '')}, {row.get('city_town', '')} ({row.get('village', '')})")
+                st.write(f"📝 **תקציר:** {row.get('summary', '')}")
+                st.write(f"👤 **התווסף ע\"י:** {row.get('added_by', '')}")
                 
             with col2:
-                st.write(f"💰 **מחיר:** €{row['price_eur']:,}")
-                st.write(f"📐 **שטח בנוי:** {row['built_sqm']} מ\"ר | **מגרש:** {row['plot_sqm']} מ\"ר")
-                st.write(f"🛏️ **חדרים:** {row['bedrooms']} חדרים | 🛁 {row['bathrooms']} רחצה")
-                st.write(f"🏊‍♂️ **בריכה:** {'כן' if row['has_pool'] else 'לא'} | 🌊 **נוף לים:** {'כן' if row['sea_view'] else 'לא'}")
+                price = row.get('price_eur', 0)
+                st.write(f"💰 **מחיר:** €{price:,}" if isinstance(price, (int, float)) else f"💰 **מחיר:** €{price}")
+                st.write(f"📐 **שטח בנוי:** {row.get('built_sqm', 0)} מ\"ר | **מגרש:** {row.get('plot_sqm', 0)} מ\"ר")
+                st.write(f"🛏️ **חדרים:** {row.get('bedrooms', 0)} חדרים | 🛁 {row.get('bathrooms', 0)} רחצה")
+                st.write(f"🏊‍♂️ **בריכה:** {'כן' if row.get('has_pool') else 'לא'} | 🌊 **נוף לים:** {'כן' if row.get('sea_view') else 'לא'}")
                 
             with col3:
-                st.metric("🏆 ציון משוקלל סופי", f"{row['total_score']} / 10")
-                st.caption(f"פיזי: {row['physical_score']} | מיקום: {row['location_score']} | Airbnb: {row['airbnb_score']}")
-                if row['url'] != "N/A":
+                st.metric("🏆 ציון משוקלל סופי", f"{row.get('total_score', 0)} / 10")
+                st.caption(f"פיזי: {row.get('physical_score', 0)} | מיקום: {row.get('location_score', 0)} | Airbnb: {row.get('airbnb_score', 0)}")
+                if str(row.get('url', 'N/A')) != "N/A":
                     st.markdown(f"[🔗 קישור למודעה המקורית]({row['url']})")
                     
             with col4:
                 st.write("")
                 st.write("")
-                if st.button("🗑️ מחק", key=f"del_{row['id']}"):
-                    updated_props = [p for p in st.session_state.properties if p["id"] != row["id"]]
+                if st.button("🗑️ מחק", key=f"del_{row.get('id', idx)}"):
+                    updated_props = [p for p in st.session_state.properties if p.get("id") != row.get("id")]
                     save_data(updated_props)
                     st.session_state.properties = updated_props
                     st.warning("הנכס נמחק.")

@@ -1,11 +1,11 @@
 import os
 import json
-import base64
 import streamlit as st
 import pandas as pd
 from PIL import Image
 import google.generativeai as genai
 import gspread
+from google.oauth2.service_account import Credentials
 
 # ==========================================
 # 1. הגדרות בסיסיות ותצורת עמוד
@@ -21,24 +21,24 @@ GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-# חיבור בטוח ל-Google Sheets באמצעות פענוח Base64
+# חיבור בטוח ל-Google Sheets באמצעות ספריית Credentials הרשמית של Google
 def get_gsheet():
     try:
         sheet_url = st.secrets.get("spreadsheet", "")
         if not sheet_url:
             return None
         
-        # טעינת מפתח השירות המקודד ב-Base64
-        if "gcp_service_account_base64" in st.secrets:
-            b64_str = st.secrets["gcp_service_account_base64"]
-            decoded_json = base64.b64decode(b64_str).decode("utf-8")
-            creds = json.loads(decoded_json)
-            gc = gspread.service_account_from_dict(creds)
-        elif "gcp_service_account" in st.secrets:
-            creds = dict(st.secrets["gcp_service_account"])
-            if "private_key" in creds:
-                creds["private_key"] = creds["private_key"].replace("\\n", "\n")
-            gc = gspread.service_account_from_dict(creds)
+        if "gcp_service_account" in st.secrets:
+            creds_dict = dict(st.secrets["gcp_service_account"])
+            if "private_key" in creds_dict:
+                creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+            
+            scopes = [
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive"
+            ]
+            credentials = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+            gc = gspread.authorize(credentials)
         else:
             gc = gspread.public_credentials()
             

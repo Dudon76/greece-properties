@@ -27,12 +27,15 @@ def get_gsheet():
         if not sheet_url:
             return None
         
-        # חיבור באמצעות ה-Service Account מה-Secrets
         if "gcp_service_account" in st.secrets:
             creds = dict(st.secrets["gcp_service_account"])
-            # תיקון וניקוי תווי private_key למניעת שגיאת PEM
+            # ניקוי וסנכרון מלא של ה-private_key למניעת שגיאות PEM
             if "private_key" in creds:
-                creds["private_key"] = creds["private_key"].replace("\\n", "\n")
+                pkey = creds["private_key"]
+                pkey = pkey.replace("\\n", "\n")
+                if not pkey.endswith("\n"):
+                    pkey += "\n"
+                creds["private_key"] = pkey
             gc = gspread.service_account_from_dict(creds)
         else:
             gc = gspread.public_credentials()
@@ -62,7 +65,6 @@ def save_data(data_list):
         try:
             df = pd.DataFrame(data_list)
             sheet.clear()
-            # כתיבת הכותרות והנתונים בשורות אופקיות
             sheet.update([df.columns.values.tolist()] + df.values.tolist())
         except Exception as e:
             st.error(f"שגיאה בשמירת הנתונים ל-Google Sheets: {e}")

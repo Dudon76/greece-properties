@@ -127,7 +127,7 @@ with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=
     
     with col_input1:
         added_by = st.selectbox("שם בן המשפחה המוסיף:", ["דודי", "גל", "מאיר/פזית", "אחר"])
-        property_url = st.text_input("קישור למודעה / פוסט (אופציונלי):")
+        property_url = st.text_input("🔗 קישור למודעה / פוסט (לשמירה וחזרה ישירה לנכס):")
         property_text = st.text_area("טקסט המודעה / הערות נוספות:", placeholder="הדבק כאן טקסט במידת הצורך...")
         
     with col_input2:
@@ -149,13 +149,14 @@ with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=
         else:
             with st.spinner("מנוע ה-AI מנתח את הנתונים..."):
                 try:
-                    combined_text = f"URL: {property_url}\n{property_text}" if property_url else property_text
-                    parsed_data = analyze_with_gemini(user_text=combined_text, image_files=images_to_process)
+                    # שימוש בטקסט או בתמונות עבור מנוע ה-AI
+                    parsed_data = analyze_with_gemini(user_text=property_text, image_files=images_to_process)
                     
                     current_props = load_data()
                     parsed_data["id"] = len(current_props) + 1
                     parsed_data["added_by"] = added_by
-                    parsed_data["url"] = property_url if property_url else "N/A"
+                    # שמירת הקישור בצורה מפורשת ב-DB
+                    parsed_data["url"] = property_url.strip() if property_url and property_url.strip() != "" else "N/A"
                     
                     current_props.append(parsed_data)
                     save_data(current_props)
@@ -212,8 +213,12 @@ else:
             with col3:
                 st.metric("🏆 ציון משוקלל סופי", f"{row.get('total_score', 0)} / 10")
                 st.caption(f"פיזי: {row.get('physical_score', 0)} | מיקום: {row.get('location_score', 0)} | Airbnb: {row.get('airbnb_score', 0)}")
-                if str(row.get('url', 'N/A')) != "N/A":
-                    st.markdown(f"[🔗 קישור למודעה המקורית]({row['url']})")
+                
+                url_val = str(row.get('url', 'N/A'))
+                if url_val != "N/A" and url_val.startswith("http"):
+                    st.markdown(f"[🔗 פתח מודעה מקורית]({url_val})")
+                elif url_val != "N/A":
+                    st.write(f"🔗 **קישור:** {url_val}")
                     
             with col4:
                 st.write("")

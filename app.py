@@ -30,6 +30,9 @@ def get_gsheet():
         # חיבור באמצעות ה-Service Account מה-Secrets
         if "gcp_service_account" in st.secrets:
             creds = dict(st.secrets["gcp_service_account"])
+            # תיקון וניקוי תווי private_key למניעת שגיאת PEM
+            if "private_key" in creds:
+                creds["private_key"] = creds["private_key"].replace("\\n", "\n")
             gc = gspread.service_account_from_dict(creds)
         else:
             gc = gspread.public_credentials()

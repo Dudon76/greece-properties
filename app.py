@@ -29,13 +29,9 @@ def get_gsheet():
         
         if "gcp_service_account" in st.secrets:
             creds = dict(st.secrets["gcp_service_account"])
-            # ניקוי וסנכרון מלא של ה-private_key למניעת שגיאות PEM
             if "private_key" in creds:
-                pkey = creds["private_key"]
-                pkey = pkey.replace("\\n", "\n")
-                if not pkey.endswith("\n"):
-                    pkey += "\n"
-                creds["private_key"] = pkey
+                # המרה תקינה של שורות חדשות במפתח RSA
+                creds["private_key"] = creds["private_key"].replace("\\n", "\n")
             gc = gspread.service_account_from_dict(creds)
         else:
             gc = gspread.public_credentials()

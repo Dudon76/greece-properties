@@ -4,6 +4,7 @@ import streamlit as st
 import pandas as pd
 from PIL import Image
 import google.generativeai as genai
+from streamlit_gsheets import GSheetsConnection
 
 # ==========================================
 # 1. הגדרות בסיסיות ותצורת עמוד
@@ -19,27 +20,27 @@ GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-# קובץ הנתונים המקומי
-DB_FILE = "properties_db.json"
+# חיבור ל-Google Sheets
+conn = st.connection("gsheets", type=GSheetsConnection)
 
-# ==========================================
-# 2. ניהול בסיס הנתונים
-# ==========================================
 def load_data():
-    if os.path.exists(DB_FILE):
-        with open(DB_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return []
+    try:
+        df = conn.read(ttl=0)
+        if df.empty:
+            return []
+        return df.to_dict(orient="records")
+    except Exception:
+        return []
 
-def save_data(data):
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+def save_data(data_list):
+    df = pd.DataFrame(data_list)
+    conn.update(data=df)
 
 if "properties" not in st.session_state:
     st.session_state.properties = load_data()
 
 # ==========================================
-# 3. מנוע AI לחילוץ נתונים מ-Gemini
+# 2. מנוע AI לחילוץ נתונים מ-Gemini
 # ==========================================
 SYSTEM_INSTRUCTION = """
 אתה מומחה נדל"ן ומעריך נכסים ביוון. תפקידך לחלץ מודעת נדל"ן (מטקסט, קישור או תמונות/צילומי מסך) ולהחזיר אך ורק אובייקט JSON תקני ללא טקסט מעבר לכך.
@@ -76,12 +77,10 @@ def analyze_with_gemini(user_text=None, image_files=None):
     )
     
     contents = []
-    
     if image_files:
         for img_file in image_files:
             if img_file is not None:
-                img = Image.open(img_file)
-                contents.append(img)
+                contents.append(Image.open(img_file))
             
     if user_text:
         contents.append(user_text)
@@ -90,12 +89,11 @@ def analyze_with_gemini(user_text=None, image_files=None):
     return json.loads(response.text)
 
 # ==========================================
-# 4. ממשק המשתמש (UI)
+# 3. ממשק המשתמש (UI)
 # ==========================================
 st.title("🏠 מנוע השוואת נכסים ביוון - לוח משפחתי")
 st.caption("הוסיפו צילומי מסך או טקסט של מודעה, וה-AI יחלץ את הנתונים וידרג אותה אוטומטית.")
 
-# --- אזור הוספת נכס חדש ---
 with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=True):
     col_input1, col_input2 = st.columns(2)
     
@@ -105,47 +103,40 @@ with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=
         property_text = st.text_area("טקסט המודעה / הערות נוספות:", placeholder="הדבק כאן טקסט במידת הצורך...")
         
     with col_input2:
-        # העלאת תמונה ראשונה
-        uploaded_image_1 = st.file_uploader(
-            "📷 צילום מסך 1 (חלק ראשי של המודעה):", 
-            type=["jpg", "jpeg", "png"],
-            key="img1"
-        )
+        uploaded_image_1 = st.file_uploader("📷 צילום מסך 1 (חלק ראשי):", type=["jpg", "jpeg", "png"], key="img1")
         if uploaded_image_1 is not None:
             st.success(f"✔️ תמונה 1 נטענה: {uploaded_image_1.name}")
             st.image(uploaded_image_1, width=120)
             
         st.write("---")
         
-        # העלאת תמונה שנייה (אופציונלית - המשך המודעה)
-        uploaded_image_2 = st.file_uploader(
-            "📷 צילום מסך 2 (המשך המודעה - אופציונלי):", 
-            type=["jpg", "jpeg", "png"],
-            key="img2"
-        )
+        uploaded_image_2 = st.file_uploader("📷 צילום מסך 2 (המשך המודעה - אופציונלי):", type=["jpg", "jpeg", "png"], key="img2")
         if uploaded_image_2 is not None:
             st.success(f"✔️ תמונה 2 נטענה: {uploaded_image_2.name}")
             st.image(uploaded_image_2, width=120)
         
-    # איסוף התמונות שהועלו לרשימה
     images_to_process = [img for img in [uploaded_image_1, uploaded_image_2] if img is not None]
 
     if st.button("🚀 נתח והוסף נכס ללוח", use_container_width=True):
         if not property_text and not images_to_process and not property_url:
             st.error("יש לספק לפחות צילום מסך אחד, טקסט או קישור למודעה.")
         else:
-            with st.spinner("מנוע ה-AI מנתח את התמונות והנתונים ומחשב ניקוד..."):
+            with st.spinner("מנוע ה-AI מנתח את הנתונים ושומר ב-Google Sheets..."):
                 try:
                     combined_text = f"URL: {property_url}\n{property_text}" if property_url else property_text
                     parsed_data = analyze_with_gemini(user_text=combined_text, image_files=images_to_process)
                     
-                    parsed_data["id"] = len(st.session_state.properties) + 1
+                    # רשימת הנתונים העדכנית
+                    current_props = load_data()
+                    parsed_data["id"] = len(current_props) + 1
                     parsed_data["added_by"] = added_by
                     parsed_data["url"] = property_url if property_url else "N/A"
                     
-                    st.session_state.properties.append(parsed_data)
-                    save_data(st.session_state.properties)
-                    st.success(f"הנכס '{parsed_data['property_title']}' נוסף בהצלחה!")
+                    current_props.append(parsed_data)
+                    save_data(current_props)
+                    
+                    st.session_state.properties = current_props
+                    st.success(f"הנכס '{parsed_data['property_title']}' נשמר בהצלחה ב-Google Sheets!")
                     st.rerun()
                 except Exception as e:
                     st.error(f"שגיאה בניתוח המודעה: {e}")
@@ -153,9 +144,12 @@ with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=
 st.divider()
 
 # ==========================================
-# 5. הצגת טבלת ההשוואה והמחיקה
+# 4. הצגת טבלת ההשוואה והמחיקה
 # ==========================================
 st.subheader("📋 טבלת השוואת נכסים (ממוינת לפי ציון משוקלל)")
+
+# טעינת נתונים עדכנית ישירות מ-Google Sheets
+st.session_state.properties = load_data()
 
 if not st.session_state.properties:
     st.info("עדיין לא הוספו נכסים. השתמשו בטופס למעלה כדי להוסיף את הנכס הראשון!")
@@ -199,7 +193,8 @@ else:
                 st.write("")
                 st.write("")
                 if st.button("🗑️ מחק", key=f"del_{row['id']}"):
-                    st.session_state.properties = [p for p in st.session_state.properties if p["id"] != row["id"]]
-                    save_data(st.session_state.properties)
-                    st.warning("הנכס נמחק מהרשימה.")
+                    updated_props = [p for p in st.session_state.properties if p["id"] != row["id"]]
+                    save_data(updated_props)
+                    st.session_state.properties = updated_props
+                    st.warning("הנכס נמחק.")
                     st.rerun()

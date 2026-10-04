@@ -4,7 +4,7 @@ import streamlit as st
 import pandas as pd
 from PIL import Image
 import google.generativeai as genai
-import gspread
+from supabase import create_client, Client
 
 # ==========================================
 # 1. הגדרות בסיסיות ותצורת עמוד
@@ -15,63 +15,44 @@ st.set_page_config(
     layout="wide"
 )
 
-# שליפת מפתח ה-API מתוך ה-Secrets
+# שליפת מפתחות API מתוך ה-Secrets
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-# חיבור יציב ל-Google Sheets
-def get_gsheet():
-    try:
-        sheet_url = st.secrets.get("spreadsheet", "")
-        p_key = st.secrets.get("private_key", "")
-        
-        if not sheet_url or not p_key:
-            return None
-        
-        # בניית המילון בצורה נקייה וישירה בקוד
-        creds = {
-            "type": "service_account",
-            "project_id": "greece-properties",
-            "private_key_id": "f43f236d79da95b9ce04c070e8981bfd63b1e63e",
-            "private_key": p_key.replace("\\n", "\n"),
-            "client_email": "greece-app-bot@greece-properties.iam.gserviceaccount.com",
-            "client_id": "105473619416908677613",
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-            "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/greece-app-bot%40greece-properties.iam.gserviceaccount.com"
-        }
-        
-        gc = gspread.service_account_from_dict(creds)
-        sh = gc.open_by_url(sheet_url)
-        return sh.sheet1
-    except Exception as e:
-        st.error(f"שגיאה בהתחברות ל-Google Sheets: {e}")
-        return None
+SUPABASE_URL = st.secrets.get("SUPABASE_URL", "")
+SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", "")
+
+@st.cache_resource
+def init_supabase() -> Client:
+    if SUPABASE_URL and SUPABASE_KEY:
+        return create_client(SUPABASE_URL, SUPABASE_KEY)
+    return None
+
+supabase_client = init_supabase()
 
 def load_data():
-    sheet = get_gsheet()
-    if sheet:
+    if supabase_client:
         try:
-            records = sheet.get_all_records()
+            res = supabase_client.table("properties").select("*").execute()
+            records = [item["data"] for item in res.data if "data" in item]
             return records
-        except Exception:
-            pass
+        except Exception as e:
+            st.error(f"שגיאה בטעינת נתונים מ-Supabase: {e}")
     if "local_db" not in st.session_state:
         st.session_state.local_db = []
     return st.session_state.local_db
 
 def save_data(data_list):
     st.session_state.local_db = data_list
-    sheet = get_gsheet()
-    if sheet and data_list:
+    if supabase_client and data_list:
         try:
-            df = pd.DataFrame(data_list)
-            sheet.clear()
-            sheet.update([df.columns.values.tolist()] + df.values.tolist())
+            # ניקוי ועדכון השורות בבסיס הנתונים
+            supabase_client.table("properties").delete().neq("id", -1).execute()
+            rows_to_insert = [{"data": prop} for prop in data_list]
+            supabase_client.table("properties").insert(rows_to_insert).execute()
         except Exception as e:
-            st.error(f"שגיאה בשמירת הנתונים ל-Google Sheets: {e}")
+            st.error(f"שגיאה בשמירת נתונים ל-Supabase: {e}")
 
 if "properties" not in st.session_state:
     st.session_state.properties = load_data()
@@ -158,7 +139,7 @@ with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=
         if not property_text and not images_to_process and not property_url:
             st.error("יש לספק לפחות צילום מסך אחד, טקסט או קישור למודעה.")
         else:
-            with st.spinner("מנוע ה-AI מנתח את הנתונים ושומר ב-Google Sheets..."):
+            with st.spinner("מנוע ה-AI מנתח את הנתונים ושומר בענן..."):
                 try:
                     combined_text = f"URL: {property_url}\n{property_text}" if property_url else property_text
                     parsed_data = analyze_with_gemini(user_text=combined_text, image_files=images_to_process)
@@ -172,7 +153,7 @@ with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=
                     save_data(current_props)
                     
                     st.session_state.properties = current_props
-                    st.success(f"הנכס '{parsed_data['property_title']}' נשמר בהצלחה ב-Google Sheets!")
+                    st.success(f"הנכס '{parsed_data['property_title']}' נשמר בהצלחה בענן!")
                     st.rerun()
                 except Exception as e:
                     st.error(f"שגיאה בניתוח המודעה: {e}")

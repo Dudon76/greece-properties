@@ -3,4 +3,5 @@ pandas
 openpyxl
 google-generativeai
 pillow
-streamlit-gsheets
+st-filesconnection
+google-auth

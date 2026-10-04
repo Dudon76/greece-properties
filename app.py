@@ -49,7 +49,7 @@ def load_data():
         records = [json.loads(r[0]) for r in rows]
         return records
     except Exception as e:
-        st.error(f"שגיאה שטעינת נתונים: {e}")
+        st.error(f"שגיאה בטעינת נתונים: {e}")
         return []
 
 def save_data(data_list):
@@ -99,7 +99,7 @@ total_score = (0.4 * physical_score) + (0.3 * location_score) + (0.3 * airbnb_sc
 
 def analyze_with_gemini(user_text=None, image_files=None):
     model = genai.GenerativeModel(
-        model_name="gemini-3.8-flash",
+        model_name="gemini-1.5-flash",
         system_instruction=SYSTEM_INSTRUCTION,
         generation_config={"response_mime_type": "application/json"}
     )
@@ -131,17 +131,15 @@ with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=
         property_text = st.text_area("טקסט המודעה / הערות נוספות:", placeholder="הדבק כאן טקסט במידת הצורך...")
         
     with col_input2:
-        uploaded_image_1 = st.file_uploader("📷 צילום מסך 1 (חלק ראשי):", type=["jpg", "jpeg", "png"], key="img1")
+        uploaded_image_1 = st.file_uploader("📷 צילום מסך 1 (חלק ראשי):", type=["jpg", "jpeg", "png"], key="img1_uploader")
         if uploaded_image_1 is not None:
-            st.success(f"✔️ תמונה 1 נטענה: {uploaded_image_1.name}")
-            st.image(uploaded_image_1, width=120)
+            st.image(uploaded_image_1, caption=f"תמונה 1: {uploaded_image_1.name}", width=200)
             
         st.write("---")
         
-        uploaded_image_2 = st.file_uploader("📷 צילום מסך 2 (המשך המודעה - אופציונלי):", type=["jpg", "jpeg", "png"], key="img2")
+        uploaded_image_2 = st.file_uploader("📷 צילום מסך 2 (המשך המודעה - אופציונלי):", type=["jpg", "jpeg", "png"], key="img2_uploader")
         if uploaded_image_2 is not None:
-            st.success(f"✔️ תמונה 2 נטענה: {uploaded_image_2.name}")
-            st.image(uploaded_image_2, width=120)
+            st.image(uploaded_image_2, caption=f"תמונה 2: {uploaded_image_2.name}", width=200)
         
     images_to_process = [img for img in [uploaded_image_1, uploaded_image_2] if img is not None]
 

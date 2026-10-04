@@ -97,9 +97,25 @@ SYSTEM_INSTRUCTION = """
 total_score = (0.4 * physical_score) + (0.3 * location_score) + (0.3 * airbnb_score)
 """
 
+import time
+
 def analyze_with_gemini(user_text=None, image_files=None):
+    # רשימת המודלים הנתמכים לפי סדר עדיפויות
+    preferred_models = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-2.5-flash"]
+    
+    # חיפוש מודל זמין מתוך ה-API
+    active_model_name = "gemini-3.8-flash"
+    try:
+        available_models = [m.name.replace("models/", "") for m in genai.list_models() if "generateContent" in m.supported_generation_methods]
+        for m_name in preferred_models:
+            if m_name in available_models:
+                active_model_name = m_name
+                break
+    except Exception:
+        pass
+
     model = genai.GenerativeModel(
-        model_name="gemini-3.8-flash",
+        model_name=active_model_name,
         system_instruction=SYSTEM_INSTRUCTION,
         generation_config={"response_mime_type": "application/json"}
     )
@@ -113,8 +129,16 @@ def analyze_with_gemini(user_text=None, image_files=None):
     if user_text:
         contents.append(user_text)
         
-    response = model.generate_content(contents)
-    return json.loads(response.text)
+    # ניסיון קריאה עם השהיה קצרה במקרה של עומס רגעי
+    for attempt in range(3):
+        try:
+            response = model.generate_content(contents)
+            return json.loads(response.text)
+        except Exception as e:
+            if "429" in str(e) and attempt < 2:
+                time.sleep(4)  # המתנה של 4 שניות בעת הגעה למכסת דקה
+                continue
+            raise e
 
 # ==========================================
 # 3. ממשק המשתמש (UI)

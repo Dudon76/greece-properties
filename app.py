@@ -20,24 +20,32 @@ GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-# חיבור בטוח ל-Google Sheets
+# חיבור יציב ל-Google Sheets
 def get_gsheet():
     try:
         sheet_url = st.secrets.get("spreadsheet", "")
-        if not sheet_url:
+        p_key = st.secrets.get("private_key", "")
+        
+        if not sheet_url or not p_key:
             return None
         
-        if "gcp_service_account" in st.secrets:
-            creds = dict(st.secrets["gcp_service_account"])
-            # סניטציה קצרה למקרה שבו נשארו לוכסנים מילוליים
-            if "private_key" in creds:
-                creds["private_key"] = creds["private_key"].replace("\\n", "\n")
-            gc = gspread.service_account_from_dict(creds)
-            sh = gc.open_by_url(sheet_url)
-            return sh.sheet1
-        else:
-            st.error("לא נמצאו הגדרות gcp_service_account ב-Secrets.")
-            return None
+        # בניית המילון בצורה נקייה וישירה בקוד
+        creds = {
+            "type": "service_account",
+            "project_id": "greece-properties",
+            "private_key_id": "f43f236d79da95b9ce04c070e8981bfd63b1e63e",
+            "private_key": p_key.replace("\\n", "\n"),
+            "client_email": "greece-app-bot@greece-properties.iam.gserviceaccount.com",
+            "client_id": "105473619416908677613",
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/greece-app-bot%40greece-properties.iam.gserviceaccount.com"
+        }
+        
+        gc = gspread.service_account_from_dict(creds)
+        sh = gc.open_by_url(sheet_url)
+        return sh.sheet1
     except Exception as e:
         st.error(f"שגיאה בהתחברות ל-Google Sheets: {e}")
         return None
@@ -209,7 +217,7 @@ else:
                 price = row.get('price_eur', 0)
                 st.write(f"💰 **מחיר:** €{price:,}" if isinstance(price, (int, float)) else f"💰 **מחיר:** €{price}")
                 st.write(f"📐 **שטח בנוי:** {row.get('built_sqm', 0)} מ\"ר | **מגרש:** {row.get('plot_sqm', 0)} מ\"ר")
-                st.write(f"🛏️️ **חדרים:** {row.get('bedrooms', 0)} חדרים | 🛁 {row.get('bathrooms', 0)} רחצה")
+                st.write(f"🛏️ **חדרים:** {row.get('bedrooms', 0)} חדרים | 🛁 {row.get('bathrooms', 0)} רחצה")
                 st.write(f"🏊‍♂️ **בריכה:** {'כן' if row.get('has_pool') else 'לא'} | 🌊 **נוף לים:** {'כן' if row.get('sea_view') else 'לא'}")
                 
             with col3:

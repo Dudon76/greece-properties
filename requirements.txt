@@ -3,5 +3,4 @@ pandas
 openpyxl
 google-generativeai
 pillow
-st-filesconnection
-google-auth
+gspread

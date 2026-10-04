@@ -15,21 +15,29 @@ st.set_page_config(
     layout="wide"
 )
 
-# שליפת מפתח ה-API מתוך ה-Secrets של Streamlit
+# שליפת מפתח ה-API מתוך ה-Secrets
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-# חיבור ל-Google Sheets דרך gspread
+# חיבור בטוח ל-Google Sheets דרך gcp_service_account
 def get_gsheet():
     try:
         sheet_url = st.secrets.get("spreadsheet", "")
         if not sheet_url:
             return None
-        gc = gspread.public_credentials()
+        
+        # חיבור באמצעות ה-Service Account מה-Secrets
+        if "gcp_service_account" in st.secrets:
+            creds = dict(st.secrets["gcp_service_account"])
+            gc = gspread.service_account_from_dict(creds)
+        else:
+            gc = gspread.public_credentials()
+            
         sh = gc.open_by_url(sheet_url)
         return sh.sheet1
-    except Exception:
+    except Exception as e:
+        st.error(f"שגיאה בהתחברות ל-Google Sheets: {e}")
         return None
 
 def load_data():
@@ -51,9 +59,10 @@ def save_data(data_list):
         try:
             df = pd.DataFrame(data_list)
             sheet.clear()
+            # כתיבת הכותרות והנתונים בשורות אופקיות
             sheet.update([df.columns.values.tolist()] + df.values.tolist())
-        except Exception:
-            pass
+        except Exception as e:
+            st.error(f"שגיאה בשמירת הנתונים ל-Google Sheets: {e}")
 
 if "properties" not in st.session_state:
     st.session_state.properties = load_data()
@@ -140,7 +149,7 @@ with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=
         if not property_text and not images_to_process and not property_url:
             st.error("יש לספק לפחות צילום מסך אחד, טקסט או קישור למודעה.")
         else:
-            with st.spinner("מנוע ה-AI מנתח את הנתונים ושומר בלוח..."):
+            with st.spinner("מנוע ה-AI מנתח את הנתונים ושומר ב-Google Sheets..."):
                 try:
                     combined_text = f"URL: {property_url}\n{property_text}" if property_url else property_text
                     parsed_data = analyze_with_gemini(user_text=combined_text, image_files=images_to_process)
@@ -154,7 +163,7 @@ with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=
                     save_data(current_props)
                     
                     st.session_state.properties = current_props
-                    st.success(f"הנכס '{parsed_data['property_title']}' נשמר בהצלחה!")
+                    st.success(f"הנכס '{parsed_data['property_title']}' נשמר בהצלחה ב-Google Sheets!")
                     st.rerun()
                 except Exception as e:
                     st.error(f"שגיאה בניתוח המודעה: {e}")

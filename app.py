@@ -5,7 +5,6 @@ import pandas as pd
 from PIL import Image
 import google.generativeai as genai
 import gspread
-from google.oauth2.service_account import Credentials
 
 # ==========================================
 # 1. הגדרות בסיסיות ותצורת עמוד
@@ -21,27 +20,13 @@ GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-# חיבור בטוח ל-Google Sheets באמצעות ספריית Credentials הרשמית של Google
+# חיבור ישיר ל-Google Sheets
 def get_gsheet():
     try:
         sheet_url = st.secrets.get("spreadsheet", "")
         if not sheet_url:
             return None
-        
-        if "gcp_service_account" in st.secrets:
-            creds_dict = dict(st.secrets["gcp_service_account"])
-            if "private_key" in creds_dict:
-                creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-            
-            scopes = [
-                "https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/drive"
-            ]
-            credentials = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-            gc = gspread.authorize(credentials)
-        else:
-            gc = gspread.public_credentials()
-            
+        gc = gspread.public_credentials()
         sh = gc.open_by_url(sheet_url)
         return sh.sheet1
     except Exception as e:

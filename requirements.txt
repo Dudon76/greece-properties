@@ -1,6 +1,5 @@
 streamlit
+google-generativeai
 pandas
 openpyxl
-google-generativeai
-pillow
-gspread
+supabase

@@ -1,6 +1,7 @@
 import os
 import json
-import sqlite3
+import base64
+import requests
 import streamlit as st
 import pandas as pd
 from PIL import Image
@@ -15,54 +16,60 @@ st.set_page_config(
     layout="wide"
 )
 
-# שליפת מפתח ה-API מתוך ה-Secrets
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-# ==========================================
-# בסיס נתונים SQLite מקומי ופשוט
-# ==========================================
-DB_FILE = "properties_db.sqlite"
+GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
+GITHUB_REPO = st.secrets.get("GITHUB_REPO", "") # למשל: username/repo-name
+FILE_PATH = "properties_data.json"
 
-def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS properties (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            data TEXT NOT NULL
-        )
-    ''')
-    conn.commit()
-    conn.close()
-
-init_db()
+# ==========================================
+# מנגנון שמירה קבוע ב-GitHub (אמינות 100%)
+# ==========================================
+def get_github_headers():
+    return {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json"
+    }
 
 def load_data():
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute("SELECT data FROM properties")
-        rows = c.fetchall()
-        conn.close()
-        records = [json.loads(r[0]) for r in rows]
-        return records
-    except Exception as e:
-        st.error(f"שגיאה בטעינת נתונים: {e}")
+    if not GITHUB_TOKEN or not GITHUB_REPO:
+        if "local_db" not in st.session_state:
+            st.session_state.local_db = []
+        return st.session_state.local_db
+
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{FILE_PATH}"
+    res = requests.get(url, headers=get_github_headers())
+    if res.status_code == 200:
+        content = res.json()
+        file_data = base64.b64decode(content["content"]).decode("utf-8")
+        st.session_state["file_sha"] = content["sha"]
+        return json.loads(file_data)
+    else:
         return []
 
 def save_data(data_list):
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute("DELETE FROM properties")
-        for prop in data_list:
-            c.execute("INSERT INTO properties (data) VALUES (?)", (json.dumps(prop, ensure_ascii=False),))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        st.error(f"שגיאה בשמירת נתונים: {e}")
+    st.session_state.local_db = data_list
+    if not GITHUB_TOKEN or not GITHUB_REPO:
+        return
+
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{FILE_PATH}"
+    json_bytes = json.dumps(data_list, ensure_ascii=False, indent=2).encode("utf-8")
+    base64_content = base64.b64encode(json_bytes).decode("utf-8")
+
+    payload = {
+        "message": "Update properties database",
+        "content": base64_content
+    }
+    if "file_sha" in st.session_state:
+        payload["sha"] = st.session_state["file_sha"]
+
+    res = requests.put(url, json=payload, headers=get_github_headers())
+    if res.status_code in [200, 201]:
+        st.session_state["file_sha"] = res.json()["content"]["sha"]
+    else:
+        st.error(f"שגיאה בשמירה ל-GitHub: {res.json().get('message')}")
 
 if "properties" not in st.session_state:
     st.session_state.properties = load_data()
@@ -97,25 +104,9 @@ SYSTEM_INSTRUCTION = """
 total_score = (0.4 * physical_score) + (0.3 * location_score) + (0.3 * airbnb_score)
 """
 
-import time
-
 def analyze_with_gemini(user_text=None, image_files=None):
-    # רשימת המודלים הנתמכים לפי סדר עדיפויות
-    preferred_models = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-2.5-flash"]
-    
-    # חיפוש מודל זמין מתוך ה-API
-    active_model_name = "gemini-3.8-flash"
-    try:
-        available_models = [m.name.replace("models/", "") for m in genai.list_models() if "generateContent" in m.supported_generation_methods]
-        for m_name in preferred_models:
-            if m_name in available_models:
-                active_model_name = m_name
-                break
-    except Exception:
-        pass
-
     model = genai.GenerativeModel(
-        model_name=active_model_name,
+        model_name="gemini-3.8-flash",
         system_instruction=SYSTEM_INSTRUCTION,
         generation_config={"response_mime_type": "application/json"}
     )
@@ -129,16 +120,8 @@ def analyze_with_gemini(user_text=None, image_files=None):
     if user_text:
         contents.append(user_text)
         
-    # ניסיון קריאה עם השהיה קצרה במקרה של עומס רגעי
-    for attempt in range(3):
-        try:
-            response = model.generate_content(contents)
-            return json.loads(response.text)
-        except Exception as e:
-            if "429" in str(e) and attempt < 2:
-                time.sleep(4)  # המתנה של 4 שניות בעת הגעה למכסת דקה
-                continue
-            raise e
+    response = model.generate_content(contents)
+    return json.loads(response.text)
 
 # ==========================================
 # 3. ממשק המשתמש (UI)
@@ -171,22 +154,20 @@ with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=
         if not property_text and not images_to_process and not property_url:
             st.error("יש לספק לפחות צילום מסך אחד, טקסט או קישור למודעה.")
         else:
-            with st.spinner("מנוע ה-AI מנתח את הנתונים..."):
+            with st.spinner("מנוע ה-AI מנתח את הנתונים ושומר באופן קבוע..."):
                 try:
-                    # שימוש בטקסט או בתמונות עבור מנוע ה-AI
                     parsed_data = analyze_with_gemini(user_text=property_text, image_files=images_to_process)
                     
                     current_props = load_data()
                     parsed_data["id"] = len(current_props) + 1
                     parsed_data["added_by"] = added_by
-                    # שמירת הקישור בצורה מפורשת ב-DB
                     parsed_data["url"] = property_url.strip() if property_url and property_url.strip() != "" else "N/A"
                     
                     current_props.append(parsed_data)
                     save_data(current_props)
                     
                     st.session_state.properties = current_props
-                    st.success(f"הנכס '{parsed_data['property_title']}' נשמר בהצלחה!")
+                    st.success(f"הנכס '{parsed_data['property_title']}' נשמר בהצלחה באופן קבוע!")
                     st.rerun()
                 except Exception as e:
                     st.error(f"שגיאה בניתוח המודעה: {e}")

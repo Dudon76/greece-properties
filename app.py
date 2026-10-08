@@ -176,15 +176,4 @@ def analyze_with_gemini(user_text=None, image_files=None):
 # 3. ממשק המשתמש (UI)
 # ==========================================
 st.title("🏠 מנוע השוואת נכסים ביוון - לוח משפחתי")
-st.caption("הוסיפו צילומי מסך או טקסט של מודעה, וה-AI יחלץ את הנתונים, ידרג אותה ויחשב את התשואה והעלויות הנילוות.")
-
-with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=True):
-    col_input1, col_input2 = st.columns(2)
-    
-    with col_input1:
-        added_by = st.selectbox("שם בן המשפחה המוסיף:", ["דודי", "גל", "מאיר/פזית", "אחר"])
-        property_url = st.text_input("🔗 קישור למודעה / פוסט (לשמירה וחזרה ישירה לנכס):")
-        property_text = st.text_area("טקסט המודעה / הערות נוספות:", placeholder="הדבק כאן טקסט במידת הצורך...")
-        
-    with col_input2:
-        uploaded_image_1 = st.file_uploader("📷 צילום מסך 1 (חלק ראשי):", type=["jpg", "jpeg", "png"], key
+st

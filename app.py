@@ -21,7 +21,7 @@ if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
 GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
-GITHUB_REPO = st.secrets.get("GITHUB_REPO", "") # למשל: username/repo-name
+GITHUB_REPO = st.secrets.get("GITHUB_REPO", "") # למשל: Dudon76/greece-properties
 FILE_PATH = "properties_data.json"
 
 # ==========================================
@@ -70,6 +70,55 @@ def save_data(data_list):
         st.session_state["file_sha"] = res.json()["content"]["sha"]
     else:
         st.error(f"שגיאה בשמירה ל-GitHub: {res.json().get('message')}")
+
+# ==========================================
+# פונקציות חישוב פיננסיות לנכס
+# ==========================================
+def calculate_financials(prop):
+    price = float(prop.get("price_eur", 0) or 0)
+    built_sqm = float(prop.get("built_sqm", 0) or 0)
+    physical_score = float(prop.get("physical_score", 5.0) or 5.0)
+    airbnb_score = float(prop.get("airbnb_score", 5.0) or 5.0)
+    
+    # הוצאות רכישה נלוות (8.19% מס רכישה, טאבו, עו"ד, נוטריון, חברת ליווי)
+    closing_costs = price * 0.0819
+    
+    # עלויות שיפוץ, שדרוג וריהוט (15,000 קבוע + 10,000 לכל נקודה חסרה בציון פיזי)
+    renovation_costs = 15000 + max(0, (10 - physical_score)) * 10000
+    
+    # סך ההשקעה הנדרשת
+    total_investment = price + closing_costs + renovation_costs
+    
+    # הוצאות תפעול קבועות (אנפיה + תחזוקה + ביטוח)
+    enfia = built_sqm * 3.0
+    maintenance_and_insurance = 1200.0  # גנן, בריכה, ביטוח
+    annual_fixed_expenses = enfia + maintenance_and_insurance
+    
+    # הערכת הכנסה מ-Airbnb (לפי ציון Airbnb ולילות תפוסה)
+    estimated_nights = int(airbnb_score * 12)  # למשל: ציון 8 = 96 לילות בשנה
+    nightly_rate = 350.0  # מחיר ממוצע ללילה
+    gross_annual_revenue = estimated_nights * nightly_rate
+    
+    # ניכוי ניהול (20%) ומיסים (15%)
+    mgmt_fee = gross_annual_revenue * 0.20
+    income_tax = gross_annual_revenue * 0.15
+    net_revenue_after_mgmt_tax = gross_annual_revenue - mgmt_fee - income_tax
+    
+    # רווח נטו קופתי
+    net_annual_profit = net_revenue_after_mgmt_tax - annual_fixed_expenses
+    
+    # תשואה נטו %
+    net_roi = (net_annual_profit / total_investment * 100) if total_investment > 0 else 0
+    
+    return {
+        "closing_costs": round(closing_costs),
+        "renovation_costs": round(renovation_costs),
+        "total_investment": round(total_investment),
+        "annual_fixed_expenses": round(annual_fixed_expenses),
+        "gross_annual_revenue": round(gross_annual_revenue),
+        "net_annual_profit": round(net_annual_profit),
+        "net_roi": round(net_roi, 2)
+    }
 
 if "properties" not in st.session_state:
     st.session_state.properties = load_data()
@@ -127,7 +176,7 @@ def analyze_with_gemini(user_text=None, image_files=None):
 # 3. ממשק המשתמש (UI)
 # ==========================================
 st.title("🏠 מנוע השוואת נכסים ביוון - לוח משפחתי")
-st.caption("הוסיפו צילומי מסך או טקסט של מודעה, וה-AI יחלץ את הנתונים וידרג אותה אוטומטית.")
+st.caption("הוסיפו צילומי מסך או טקסט של מודעה, וה-AI יחלץ את הנתונים, ידרג אותה ויחשב את התשואה והעלויות הנילוות.")
 
 with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=True):
     col_input1, col_input2 = st.columns(2)
@@ -177,14 +226,21 @@ st.divider()
 # ==========================================
 # 4. הצגת טבלת ההשוואה והמחיקה
 # ==========================================
-st.subheader("📋 טבלת השוואת נכסים (ממוינת לפי ציון משוקלל)")
+st.subheader("📋 טבלת השוואת נכסים (כולל ניתוח תשואה והשקעה נדרשת)")
 
 st.session_state.properties = load_data()
 
 if not st.session_state.properties:
     st.info("עדיין לא הוספו נכסים. השתמשו בטופס למעלה כדי להוסיף את הנכס הראשון!")
 else:
-    df = pd.DataFrame(st.session_state.properties)
+    # חישוב הנתונים הפיננסיים לכל נכס בטבלה
+    enriched_props = []
+    for p in st.session_state.properties:
+        fin = calculate_financials(p)
+        merged = {**p, **fin}
+        enriched_props.append(merged)
+
+    df = pd.DataFrame(enriched_props)
     if "total_score" in df.columns:
         df = df.sort_values(by="total_score", ascending=False)
     
@@ -192,15 +248,17 @@ else:
     df.to_excel(excel_file, index=False)
     with open(excel_file, "rb") as f:
         st.download_button(
-            label="📥 הורד טבלה מעודכנת לקובץ Excel",
+            label="📥 הורד טבלה מעודכנת לקובץ Excel (כולל חישובי תשואה ועלויות)",
             data=f,
             file_name="Greece_Properties_Comparison.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
     
     for idx, row in df.iterrows():
+        fin = calculate_financials(row)
+        
         with st.container(border=True):
-            col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
+            col1, col2, col3, col4 = st.columns([3, 2.5, 2.5, 1])
             
             with col1:
                 st.markdown(f"### **{row.get('property_title', 'נכס')}**")
@@ -210,23 +268,25 @@ else:
                 
             with col2:
                 price = row.get('price_eur', 0)
-                st.write(f"💰 **מחיר:** €{price:,}" if isinstance(price, (int, float)) else f"💰 **מחיר:** €{price}")
+                st.write(f"💰 **מחיר נכס:** €{price:,}" if isinstance(price, (int, float)) else f"💰 **מחיר:** €{price}")
                 st.write(f"📐 **שטח בנוי:** {row.get('built_sqm', 0)} מ\"ר | **מגרש:** {row.get('plot_sqm', 0)} מ\"ר")
                 st.write(f"🛏️ **חדרים:** {row.get('bedrooms', 0)} חדרים | 🛁 {row.get('bathrooms', 0)} רחצה")
                 st.write(f"🏊‍♂️ **בריכה:** {'כן' if row.get('has_pool') else 'לא'} | 🌊 **נוף לים:** {'כן' if row.get('sea_view') else 'לא'}")
                 
             with col3:
-                st.metric("🏆 ציון משוקלל סופי", f"{row.get('total_score', 0)} / 10")
-                st.caption(f"פיזי: {row.get('physical_score', 0)} | מיקום: {row.get('location_score', 0)} | Airbnb: {row.get('airbnb_score', 0)}")
-                
+                st.markdown("💰 **ניתוח השקעה ותשואה מוערכת:**")
+                st.write(f"🏷️ **הוצאות רכישה (8.19%):** €{fin['closing_costs']:,}")
+                st.write(f"🛠️ **שיפוץ, שדרוג וריהוט:** €{fin['renovation_costs']:,}")
+                st.write(f"💵 **סך הכל השקעה נדרשת:** **€{fin['total_investment']:,}**")
+                st.write(f"📈 **תשואה נטו משוערת:** **{fin['net_roi']}% לשנה**")
+                st.caption(f"רווח נטו משוער: €{fin['net_annual_profit']:,} / שנה")
+
+            with col4:
+                st.metric("🏆 ציון", f"{row.get('total_score', 0)}/10")
                 url_val = str(row.get('url', 'N/A'))
                 if url_val != "N/A" and url_val.startswith("http"):
-                    st.markdown(f"[🔗 פתח מודעה מקורית]({url_val})")
-                elif url_val != "N/A":
-                    st.write(f"🔗 **קישור:** {url_val}")
-                    
-            with col4:
-                st.write("")
+                    st.markdown(f"[🔗 מודעה מקורית]({url_val})")
+                
                 st.write("")
                 if st.button("🗑️ מחק", key=f"del_{row.get('id', idx)}"):
                     updated_props = [p for p in st.session_state.properties if p.get("id") != row.get("id")]

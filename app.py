@@ -176,4 +176,123 @@ def analyze_with_gemini(user_text=None, image_files=None):
 # 3. ממשק המשתמש (UI)
 # ==========================================
 st.title("🏠 מנוע השוואת נכסים ביוון - לוח משפחתי")
-st
+st.caption("הוסיפו צילומי מסך או טקסט של מודעה, וה-AI יחלץ את הנתונים, ידרג אותה ויחשב את התשואה והעלויות הנילוות.")
+
+with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=True):
+    col_input1, col_input2 = st.columns(2)
+    
+    with col_input1:
+        added_by = st.selectbox("שם בן המשפחה המוסיף:", ["דודי", "גל", "מאיר/פזית", "אחר"])
+        property_url = st.text_input("🔗 קישור למודעה / פוסט (לשמירה וחזרה ישירה לנכס):")
+        property_text = st.text_area("טקסט המודעה / הערות נוספות:", placeholder="הדבק כאן טקסט במידת הצורך...")
+        
+    with col_input2:
+        uploaded_image_1 = st.file_uploader("צילום מסך 1 - חלק ראשי", type=["jpg", "jpeg", "png"], key="img1_uploader")
+        if uploaded_image_1 is not None:
+            st.image(uploaded_image_1, caption=f"תמונה 1: {uploaded_image_1.name}", width=200)
+            
+        st.write("---")
+        
+        uploaded_image_2 = st.file_uploader("צילום מסך 2 - המשך המודעה (אופציונלי)", type=["jpg", "jpeg", "png"], key="img2_uploader")
+        if uploaded_image_2 is not None:
+            st.image(uploaded_image_2, caption=f"תמונה 2: {uploaded_image_2.name}", width=200)
+        
+    images_to_process = [img for img in [uploaded_image_1, uploaded_image_2] if img is not None]
+
+    if st.button("🚀 נתח והוסף נכס ללוח", use_container_width=True):
+        if not property_text and not images_to_process and not property_url:
+            st.error("יש לספק לפחות צילום מסך אחד, טקסט או קישור למודעה.")
+        else:
+            with st.spinner("מנוע ה-AI מנתח את הנתונים ושומר באופן קבוע..."):
+                try:
+                    parsed_data = analyze_with_gemini(user_text=property_text, image_files=images_to_process)
+                    
+                    current_props = load_data()
+                    parsed_data["id"] = len(current_props) + 1
+                    parsed_data["added_by"] = added_by
+                    parsed_data["url"] = property_url.strip() if property_url and property_url.strip() != "" else "N/A"
+                    
+                    current_props.append(parsed_data)
+                    save_data(current_props)
+                    
+                    st.session_state.properties = current_props
+                    st.success(f"הנכס '{parsed_data['property_title']}' נשמר בהצלחה באופן קבוע!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"שגיאה בניתוח המודעה: {e}")
+
+st.divider()
+
+# ==========================================
+# 4. הצגת טבלת ההשוואה והמחיקה
+# ==========================================
+st.subheader("📋 טבלת השוואת נכסים (כולל ניתוח תשואה והשקעה נדרשת)")
+
+st.session_state.properties = load_data()
+
+if not st.session_state.properties:
+    st.info("עדיין לא הוספו נכסים. השתמשו בטופס למעלה כדי להוסיף את הנכס הראשון!")
+else:
+    # חישוב הנתונים הפיננסיים לכל נכס בטבלה
+    enriched_props = []
+    for p in st.session_state.properties:
+        fin = calculate_financials(p)
+        merged = {**p, **fin}
+        enriched_props.append(merged)
+
+    df = pd.DataFrame(enriched_props)
+    if "total_score" in df.columns:
+        df = df.sort_values(by="total_score", ascending=False)
+    
+    excel_file = "greece_properties_comparison.xlsx"
+    df.to_excel(excel_file, index=False)
+    with open(excel_file, "rb") as f:
+        st.download_button(
+            label="📥 הורד טבלה מעודכנת לקובץ Excel (כולל חישובי תשואה ועלויות)",
+            data=f,
+            file_name="Greece_Properties_Comparison.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    
+    for idx, row in df.iterrows():
+        fin = calculate_financials(row)
+        
+        with st.container(border=True):
+            col1, col2, col3, col4 = st.columns([3, 2.5, 2.5, 1.2])
+            
+            with col1:
+                st.markdown(f"### **{row.get('property_title', 'נכס')}**")
+                st.write(f"📍 **מיקום:** {row.get('region', '')}, {row.get('city_town', '')} ({row.get('village', '')})")
+                st.write(f"📝 **תקציר:** {row.get('summary', '')}")
+                st.write(f"👤 **התווסף ע\"י:** {row.get('added_by', '')}")
+                
+            with col2:
+                price = row.get('price_eur', 0)
+                st.write(f"💰 **מחיר נכס:** €{price:,}" if isinstance(price, (int, float)) else f"💰 **מחיר:** €{price}")
+                st.write(f"📐 **שטח בנוי:** {row.get('built_sqm', 0)} מ\"ר | **מגרש:** {row.get('plot_sqm', 0)} מ\"ר")
+                st.write(f"🛏️ **חדרים:** {row.get('bedrooms', 0)} חדרים | 🛁 {row.get('bathrooms', 0)} רחצה")
+                st.write(f"🏊‍♂️ **בריכה:** {'כן' if row.get('has_pool') else 'לא'} | 🌊 **נוף לים:** {'כן' if row.get('sea_view') else 'לא'}")
+                
+            with col3:
+                st.markdown("💰 **ניתוח השקעה ותשואה מוערכת:**")
+                st.write(f"🏷️ **הוצאות רכישה (8.19%):** €{fin['closing_costs']:,}")
+                st.write(f"🛠️ **שיפוץ, שדרוג וריהוט:** €{fin['renovation_costs']:,}")
+                st.write(f"💵 **סך הכל השקעה נדרשת:** **€{fin['total_investment']:,}**")
+                st.write(f"📈 **תשואה נטו משוערת:** **{fin['net_roi']}% לשנה**")
+                st.caption(f"רווח נטו משוער: €{fin['net_annual_profit']:,} / שנה")
+
+            with col4:
+                st.metric("🏆 ציון", f"{row.get('total_score', 0)}/10")
+                st.caption(f"פיזי: {row.get('physical_score', 0)} | מיקום: {row.get('location_score', 0)} | Airbnb: {row.get('airbnb_score', 0)}")
+                
+                url_val = str(row.get('url', 'N/A'))
+                if url_val != "N/A" and url_val.startswith("http"):
+                    st.markdown(f"[🔗 מודעה מקורית]({url_val})")
+                
+                st.write("")
+                if st.button("🗑️ מחק", key=f"del_{row.get('id', idx)}"):
+                    updated_props = [p for p in st.session_state.properties if p.get("id") != row.get("id")]
+                    save_data(updated_props)
+                    st.session_state.properties = updated_props
+                    st.warning("הנכס נמחק.")
+                    st.rerun()

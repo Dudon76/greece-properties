@@ -80,34 +80,23 @@ def calculate_financials(prop):
     physical_score = float(prop.get("physical_score", 5.0) or 5.0)
     airbnb_score = float(prop.get("airbnb_score", 5.0) or 5.0)
     
-    # הוצאות רכישה נלוות (8.19% מס רכישה, טאבו, עו"ד, נוטריון, חברת ליווי)
     closing_costs = price * 0.0819
-    
-    # עלויות שיפוץ, שדרוג וריהוט (15,000 קבוע + 10,000 לכל נקודה חסרה בציון פיזי)
     renovation_costs = 15000 + max(0, (10 - physical_score)) * 10000
-    
-    # סך ההשקעה הנדרשת
     total_investment = price + closing_costs + renovation_costs
     
-    # הוצאות תפעול קבועות (אנפיה + תחזוקה + ביטוח)
     enfia = built_sqm * 3.0
-    maintenance_and_insurance = 1200.0  # גנן, בריכה, ביטוח
+    maintenance_and_insurance = 1200.0
     annual_fixed_expenses = enfia + maintenance_and_insurance
     
-    # הערכת הכנסה מ-Airbnb (לפי ציון Airbnb ולילות תפוסה)
-    estimated_nights = int(airbnb_score * 12)  # למשל: ציון 8 = 96 לילות בשנה
-    nightly_rate = 350.0  # מחיר ממוצע ללילה
+    estimated_nights = int(airbnb_score * 12)
+    nightly_rate = 350.0
     gross_annual_revenue = estimated_nights * nightly_rate
     
-    # ניכוי ניהול (20%) ומיסים (15%)
     mgmt_fee = gross_annual_revenue * 0.20
     income_tax = gross_annual_revenue * 0.15
     net_revenue_after_mgmt_tax = gross_annual_revenue - mgmt_fee - income_tax
     
-    # רווח נטו קופתי
     net_annual_profit = net_revenue_after_mgmt_tax - annual_fixed_expenses
-    
-    # תשואה נטו %
     net_roi = (net_annual_profit / total_investment * 100) if total_investment > 0 else 0
     
     return {
@@ -127,8 +116,7 @@ if "properties" not in st.session_state:
 # 2. מנוע AI לחילוץ נתונים מ-Gemini
 # ==========================================
 SYSTEM_INSTRUCTION = """
-אתה מומחה נדל"ן ומעריך נכסים ביוון. תפקידך לחלץ מודעת נדל"ן (מטקסט, קישור או תמונות/צילומי מסך) ולהחזיר אך ורק אובייקט JSON תקני ללא טקסט מעבר לכך.
-אם מועלות שתי תמונות, חבר את המידע מכל התמונות יחד לכדי ניתוח של נכס אחד.
+אתה מומחה נדל"ן ומעריך נכסים ביוון. תפקידך לחלץ מודעת נדל"ן (מטקסט, קישור או תמונות/צילומי מסך) ולהחזיר אך ורק אובייקט JSON תקני ללא שום דיבורים נוספים.
 
 השדות ב-JSON חייבים להיות:
 {
@@ -143,12 +131,13 @@ SYSTEM_INSTRUCTION = """
   "bathrooms": 0,
   "has_pool": false,
   "sea_view": false,
-  "physical_score": 0.0,
-  "location_score": 0.0,
-  "airbnb_score": 0.0,
-  "total_score": 0.0,
+  "physical_score": 5.0,
+  "location_score": 5.0,
+  "airbnb_score": 5.0,
+  "total_score": 5.0,
   "summary": "תקציר קצר בעברית"
 }
+אם נתון מסוים חסר בטקסט, שער באופן הגיוני או שים 0/false.
 חוקי ניקוד (1-10):
 total_score = (0.4 * physical_score) + (0.3 * location_score) + (0.3 * airbnb_score)
 """
@@ -170,7 +159,16 @@ def analyze_with_gemini(user_text=None, image_files=None):
         contents.append(user_text)
         
     response = model.generate_content(contents)
-    return json.loads(response.text)
+    
+    # ניקוי הטקסט שהתקבל מ-Gemini להבטחת JSON תקין
+    raw_text = response.text.strip()
+    if raw_text.startswith("```json"):
+        raw_text = raw_text[7:]
+    if raw_text.endswith("```"):
+        raw_text = raw_text[:-3]
+    raw_text = raw_text.strip()
+    
+    return json.loads(raw_text)
 
 # ==========================================
 # 3. ממשק המשתמש (UI)
@@ -216,10 +214,10 @@ with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=
                     save_data(current_props)
                     
                     st.session_state.properties = current_props
-                    st.success(f"הנכס '{parsed_data['property_title']}' נשמר בהצלחה באופן קבוע!")
+                    st.success(f"הנכס '{parsed_data.get('property_title', 'נכס חדש')}' נשמר בהצלחה באופן קבוע!")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"שגיאה בניתוח המודעה: {e}")
+                    st.error(f"שגיאה בניתוח המודעה: {e}. נסה להוסיף צילום מסך או לפשט מעט את הטקסט.")
 
 st.divider()
 
@@ -233,7 +231,6 @@ st.session_state.properties = load_data()
 if not st.session_state.properties:
     st.info("עדיין לא הוספו נכסים. השתמשו בטופס למעלה כדי להוסיף את הנכס הראשון!")
 else:
-    # חישוב הנתונים הפיננסיים לכל נכס בטבלה
     enriched_props = []
     for p in st.session_state.properties:
         fin = calculate_financials(p)

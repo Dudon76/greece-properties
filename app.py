@@ -116,7 +116,8 @@ if "properties" not in st.session_state:
 # 2. מנוע AI לחילוץ נתונים מ-Gemini
 # ==========================================
 SYSTEM_INSTRUCTION = """
-אתה מומחה נדל"ן ומעריך נכסים ביוון. תפקידך לחלץ מודעת נדל"ן (מטקסט, קישור או תמונות/צילומי מסך) ולהחזיר אך ורק אובייקט JSON תקני ללא שום דיבורים נוספים.
+אתה מומחה נדל"ן ומעריך נכסים ביוון. תפקידך לחלץ מודעת נדל"ן (מטקסט, קישור או תמונות/צילומי מסך מרובים) ולהחזיר אך ורק אובייקט JSON תקני ללא שום דיבורים נוספים.
+אם מועלות מספר תמונות, חבר את המידע מכל התמונות יחד לכדי ניתוח של נכס אחד.
 
 השדות ב-JSON חייבים להיות:
 {
@@ -137,7 +138,7 @@ SYSTEM_INSTRUCTION = """
   "total_score": 5.0,
   "summary": "תקציר קצר בעברית"
 }
-אם נתון מסוים חסר בטקסט, שער באופן הגיוני או שים 0/false.
+אם נתון מסוים חסר, שער באופן הגיוני או שים 0/false.
 חוקי ניקוד (1-10):
 total_score = (0.4 * physical_score) + (0.3 * location_score) + (0.3 * airbnb_score)
 """
@@ -160,7 +161,6 @@ def analyze_with_gemini(user_text=None, image_files=None):
         
     response = model.generate_content(contents)
     
-    # ניקוי הטקסט שהתקבל מ-Gemini להבטחת JSON תקין
     raw_text = response.text.strip()
     if raw_text.startswith("```json"):
         raw_text = raw_text[7:]
@@ -185,25 +185,26 @@ with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=
         property_text = st.text_area("טקסט המודעה / הערות נוספות:", placeholder="הדבק כאן טקסט במידת הצורך...")
         
     with col_input2:
-        uploaded_image_1 = st.file_uploader("צילום מסך 1 - חלק ראשי", type=["jpg", "jpeg", "png"], key="img1_uploader")
-        if uploaded_image_1 is not None:
-            st.image(uploaded_image_1, caption=f"תמונה 1: {uploaded_image_1.name}", width=200)
-            
-        st.write("---")
-        
-        uploaded_image_2 = st.file_uploader("צילום מסך 2 - המשך המודעה (אופציונלי)", type=["jpg", "jpeg", "png"], key="img2_uploader")
-        if uploaded_image_2 is not None:
-            st.image(uploaded_image_2, caption=f"תמונה 2: {uploaded_image_2.name}", width=200)
-        
-    images_to_process = [img for img in [uploaded_image_1, uploaded_image_2] if img is not None]
+        uploaded_images = st.file_uploader(
+            "📷 צילומי מסך של המודעה (ניתן לבחור מספר תמונות יחד):", 
+            type=["jpg", "jpeg", "png"], 
+            accept_multiple_files=True,
+            key="multi_img_uploader"
+        )
+        if uploaded_images:
+            st.caption(f"נבחרו {len(uploaded_images)} תמונות לניתוח:")
+            cols = st.columns(min(len(uploaded_images), 4))
+            for idx, img in enumerate(uploaded_images):
+                with cols[idx % 4]:
+                    st.image(img, use_container_width=True)
 
     if st.button("🚀 נתח והוסף נכס ללוח", use_container_width=True):
-        if not property_text and not images_to_process and not property_url:
+        if not property_text and not uploaded_images and not property_url:
             st.error("יש לספק לפחות צילום מסך אחד, טקסט או קישור למודעה.")
         else:
             with st.spinner("מנוע ה-AI מנתח את הנתונים ושומר באופן קבוע..."):
                 try:
-                    parsed_data = analyze_with_gemini(user_text=property_text, image_files=images_to_process)
+                    parsed_data = analyze_with_gemini(user_text=property_text, image_files=uploaded_images)
                     
                     current_props = load_data()
                     parsed_data["id"] = len(current_props) + 1
@@ -217,7 +218,7 @@ with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=
                     st.success(f"הנכס '{parsed_data.get('property_title', 'נכס חדש')}' נשמר בהצלחה באופן קבוע!")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"שגיאה בניתוח המודעה: {e}. נסה להוסיף צילום מסך או לפשט מעט את הטקסט.")
+                    st.error(f"שגיאה בניתוח המודעה: {e}")
 
 st.divider()
 

@@ -89,7 +89,7 @@ def evaluate_ideal_criteria(prop):
     if bedrooms < 3:
         reasons.append(f"פחות מ-3 חדרי שינה ({bedrooms} חדרים)")
 
-    # 3. שטח בנוי - 80 מ"ר מינימום
+    # 3. שטח בנוי - 80 מ\"ר מינימום
     built_sqm = float(prop.get("built_sqm", 0) or 0)
     if built_sqm < 80:
         reasons.append(f"שטח בנוי מתחת ל-80 מ\"ר ({built_sqm} מ\"ר)")
@@ -99,7 +99,7 @@ def evaluate_ideal_criteria(prop):
     if physical_score < 7.5:
         reasons.append("דורש שיפוץ/שדרוג (ציון פיזי מתחת ל-7.5)")
 
-    # 5. חצר/מגרש של מינ' 200 מ"ר (אם הנתון קיים וקטן מ-200 -> פסילה. אם 0/חסר -> מאושר!)
+    # 5. חצר/מגרש של מינ' 200 מ\"ר (אם הנתון קיים וקטן מ-200 -> פסילה. אם 0/חסר -> מאושר!)
     plot_sqm = float(prop.get("plot_sqm", 0) or 0)
     if 0 < plot_sqm < 200:
         reasons.append(f"חצר קטנה מ-200 מ\"ר ({plot_sqm} מ\"ר)")
@@ -217,7 +217,7 @@ def analyze_with_gemini(user_text=None, image_files=None):
 st.title("🏠 מנוע השוואת נכסים ביוון - לוח משפחתי")
 st.caption("הוסיפו צילומי מסך או טקסט של מודעה, וה-AI יחלץ את הנתונים, ידרג אותה ויחשב את התשואה והעלויות הנילוות.")
 
-with st.expander("🎯 קריטריוני הנכס ה"אידאלי" לרשימת המיקוד (לחץ לצפייה)", expanded=False):
+with st.expander("🎯 קריטריוני הנכס האידאלי לרשימת המיקוד (לחץ לצפייה)", expanded=False):
     st.markdown("""
     * **📍 מיקום:** אזור **אפוקורונס** (Apokoronas) בלבד.
     * **🛏️ חדרי שינה:** מינימום **3 חדרי שינה**.

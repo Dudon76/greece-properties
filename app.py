@@ -315,6 +315,8 @@ else:
                         e_region = st.text_input("אזור/אי:", value=str(row.get('region', '')))
                         e_city = st.text_input("עיר/מחוז:", value=str(row.get('city_town', '')))
                         e_village = st.text_input("כפר/שכונה:", value=str(row.get('village', '')))
+                        e_bedrooms = st.number_input("חדרי שינה:", value=int(row.get('bedrooms', 0) or 0), min_value=0)
+                        e_bathrooms = st.number_input("חדרי רחצה:", value=int(row.get('bathrooms', 0) or 0), min_value=0)
                         e_sea_view = st.checkbox("🌊 נוף לים", value=bool(row.get('sea_view', False)))
                         e_has_pool = st.checkbox("🏊‍♂️ בריכה", value=bool(row.get('has_pool', False)))
                     with ec3:
@@ -327,6 +329,16 @@ else:
                     submit_edit = st.form_submit_button("💾 שמור שינויים ועדכן נכס")
                     
                     if submit_edit:
+                        old_has_pool = bool(row.get('has_pool', False))
+                        old_sea_view = bool(row.get('sea_view', False))
+                        
+                        # הוספת בונוס אוטומטי לציון ה-Airbnb והציון הפיזי אם נוספה בריכה / נוף לים
+                        if e_has_pool and not old_has_pool:
+                            e_airbnb = min(10.0, e_airbnb + 0.5)
+                            e_phys = min(10.0, e_phys + 0.5)
+                        if e_sea_view and not old_sea_view:
+                            e_airbnb = min(10.0, e_airbnb + 0.5)
+                            
                         new_total = round((0.4 * e_phys) + (0.3 * e_loc) + (0.3 * e_airbnb), 1)
                         
                         all_props = load_data()
@@ -339,6 +351,8 @@ else:
                                 p["region"] = e_region
                                 p["city_town"] = e_city
                                 p["village"] = e_village
+                                p["bedrooms"] = e_bedrooms
+                                p["bathrooms"] = e_bathrooms
                                 p["sea_view"] = e_sea_view
                                 p["has_pool"] = e_has_pool
                                 p["physical_score"] = e_phys
@@ -350,5 +364,5 @@ else:
                         
                         save_data(all_props)
                         st.session_state.properties = all_props
-                        st.success("הנכס עודכן והציון חושב מחדש בהצלחה!")
+                        st.success("הנכס עודכן! חדרי השינה עודכנו, והציון והתשואה חושבו מחדש בהצלחה.")
                         st.rerun()

@@ -207,7 +207,7 @@ with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=
                     parsed_data = analyze_with_gemini(user_text=property_text, image_files=uploaded_images)
                     
                     current_props = load_data()
-                    parsed_data["id"] = len(current_props) + 1
+                    parsed_data["id"] = len(current_props) + 1 if current_props else 1
                     parsed_data["added_by"] = added_by
                     parsed_data["url"] = property_url.strip() if property_url and property_url.strip() != "" else "N/A"
                     
@@ -223,7 +223,7 @@ with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=
 st.divider()
 
 # ==========================================
-# 4. הצגת טבלת ההשוואה והמחיקה
+# 4. הצגת טבלת ההשוואה, עריכה ומחיקה
 # ==========================================
 st.subheader("📋 טבלת השוואת נכסים (כולל ניתוח תשואה והשקעה נדרשת)")
 
@@ -254,6 +254,7 @@ else:
     
     for idx, row in df.iterrows():
         fin = calculate_financials(row)
+        prop_id = row.get("id", idx)
         
         with st.container(border=True):
             col1, col2, col3, col4 = st.columns([3, 2.5, 2.5, 1.2])
@@ -288,9 +289,63 @@ else:
                     st.markdown(f"[🔗 מודעה מקורית]({url_val})")
                 
                 st.write("")
-                if st.button("🗑️ מחק", key=f"del_{row.get('id', idx)}"):
-                    updated_props = [p for p in st.session_state.properties if p.get("id") != row.get("id")]
+                
+                # כפתור מחיקה
+                if st.button("🗑️ מחק", key=f"del_{prop_id}"):
+                    updated_props = [p for p in st.session_state.properties if p.get("id") != prop_id]
                     save_data(updated_props)
                     st.session_state.properties = updated_props
                     st.warning("הנכס נמחק.")
                     st.rerun()
+
+            # טופס עריכה ועדכון נתונים
+            with st.expander(f"✏️ ערוך/עדכן נתונים עבור נכס #{prop_id}"):
+                with st.form(key=f"edit_form_{prop_id}"):
+                    ec1, ec2, ec3 = st.columns(3)
+                    with ec1:
+                        e_title = st.text_input("כותרת הנכס:", value=str(row.get('property_title', '')))
+                        e_price = st.number_input("מחיר ב-€:", value=int(row.get('price_eur', 0) or 0))
+                        e_built = st.number_input("שטח בנוי (מ\"ר):", value=int(row.get('built_sqm', 0) or 0))
+                        e_plot = st.number_input("שטח מגרש (מ\"ר):", value=int(row.get('plot_sqm', 0) or 0))
+                    with ec2:
+                        e_region = st.text_input("אזור/אי:", value=str(row.get('region', '')))
+                        e_city = st.text_input("עיר/מחוז:", value=str(row.get('city_town', '')))
+                        e_village = st.text_input("כפר/שכונה:", value=str(row.get('village', '')))
+                        e_sea_view = st.checkbox("🌊 נוף לים", value=bool(row.get('sea_view', False)))
+                        e_has_pool = st.checkbox("🏊‍♂️ בריכה", value=bool(row.get('has_pool', False)))
+                    with ec3:
+                        e_phys = st.slider("ציון פיזי (1-10):", 1.0, 10.0, float(row.get('physical_score', 5.0) or 5.0), 0.5)
+                        e_loc = st.slider("ציון מיקום (1-10):", 1.0, 10.0, float(row.get('location_score', 5.0) or 5.0), 0.5)
+                        e_airbnb = st.slider("ציון Airbnb (1-10):", 1.0, 10.0, float(row.get('airbnb_score', 5.0) or 5.0), 0.5)
+                    
+                    e_summary = st.text_area("תקציר/הערות נוספות:", value=str(row.get('summary', '')))
+
+                    submit_edit = st.form_submit_button("💾 שמור שינויים ועדכן נכס")
+                    
+                    if submit_edit:
+                        # חישוב ציון כולל מעודכן
+                        new_total = round((0.4 * e_phys) + (0.3 * e_loc) + (0.3 * e_airbnb), 1)
+                        
+                        all_props = load_data()
+                        for p in all_props:
+                            if p.get("id") == prop_id:
+                                p["property_title"] = e_title
+                                p["price_eur"] = e_price
+                                p["built_sqm"] = e_built
+                                p["plot_sqm"] = e_plot
+                                p["region"] = e_region
+                                p["city_town"] = e_city
+                                p["village"] = e_village
+                                p["sea_view"] = e_sea_view
+                                p["has_pool"] = e_has_pool
+                                p["physical_score"] = e_phys
+                                p["location_score"] = e_loc
+                                p["airbnb_score"] = e_airbnb
+                                p["total_score"] = new_total
+                                p["summary"] = e_summary
+                                break
+                        
+                        save_data(all_props)
+                        st.session_state.properties = all_props
+                        st.success("הנכס עודכן בהצלחה!")
+                        st.rerun()

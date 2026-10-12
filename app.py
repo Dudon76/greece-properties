@@ -320,25 +320,27 @@ else:
                         e_sea_view = st.checkbox("🌊 נוף לים", value=bool(row.get('sea_view', False)))
                         e_has_pool = st.checkbox("🏊‍♂️ בריכה", value=bool(row.get('has_pool', False)))
                     with ec3:
-                        e_phys = st.slider("ציון פיזי (1-10):", 1.0, 10.0, float(row.get('physical_score', 5.0) or 5.0), 0.5)
-                        e_loc = st.slider("ציון מיקום (1-10):", 1.0, 10.0, float(row.get('location_score', 5.0) or 5.0), 0.5)
-                        e_airbnb = st.slider("ציון Airbnb (1-10):", 1.0, 10.0, float(row.get('airbnb_score', 5.0) or 5.0), 0.5)
-                    
+                        e_phys = st.slider("ציון פיזי (1-10):", 1.0, 10.0, float(row.get('physical_score', 5.0) or 5.0), 0.1)
+                        e_loc = st.slider("ציון מיקום (1-10):", 1.0, 10.0, float(row.get('location_score', 5.0) or 5.0), 0.1)
+                        e_airbnb = st.slider("ציון Airbnb (1-10):", 1.0, 10.0, float(row.get('airbnb_score', 5.0) or 5.0), 0.1)
+                        auto_recalc = st.checkbox("⚡ שכלל ציונים אוטומטית לפי בריכה/נוף לים/חדרים", value=True)
+
                     e_summary = st.text_area("תקציר/הערות נוספות:", value=str(row.get('summary', '')))
 
                     submit_edit = st.form_submit_button("💾 שמור שינויים ועדכן נכס")
                     
                     if submit_edit:
-                        old_has_pool = bool(row.get('has_pool', False))
-                        old_sea_view = bool(row.get('sea_view', False))
-                        
-                        # הוספת בונוס אוטומטי לציון ה-Airbnb והציון הפיזי אם נוספה בריכה / נוף לים
-                        if e_has_pool and not old_has_pool:
-                            e_airbnb = min(10.0, e_airbnb + 0.5)
-                            e_phys = min(10.0, e_phys + 0.5)
-                        if e_sea_view and not old_sea_view:
-                            e_airbnb = min(10.0, e_airbnb + 0.5)
-                            
+                        if auto_recalc:
+                            # חישוב דינמי של הבונוסים בציון
+                            if e_has_pool:
+                                e_airbnb = min(10.0, max(e_airbnb, 8.5))
+                                e_phys = min(10.0, max(e_phys, 8.2))
+                            if e_sea_view:
+                                e_airbnb = min(10.0, e_airbnb + 0.3)
+                                e_loc = min(10.0, e_loc + 0.3)
+                            if e_bedrooms >= 3:
+                                e_airbnb = min(10.0, e_airbnb + 0.3)
+                                
                         new_total = round((0.4 * e_phys) + (0.3 * e_loc) + (0.3 * e_airbnb), 1)
                         
                         all_props = load_data()
@@ -355,14 +357,14 @@ else:
                                 p["bathrooms"] = e_bathrooms
                                 p["sea_view"] = e_sea_view
                                 p["has_pool"] = e_has_pool
-                                p["physical_score"] = e_phys
-                                p["location_score"] = e_loc
-                                p["airbnb_score"] = e_airbnb
+                                p["physical_score"] = round(e_phys, 1)
+                                p["location_score"] = round(e_loc, 1)
+                                p["airbnb_score"] = round(e_airbnb, 1)
                                 p["total_score"] = new_total
                                 p["summary"] = e_summary
                                 break
                         
                         save_data(all_props)
                         st.session_state.properties = all_props
-                        st.success("הנכס עודכן! חדרי השינה עודכנו, והציון והתשואה חושבו מחדש בהצלחה.")
+                        st.success(f"הנכס עודכן! הציון החדש שחושב הוא {new_total}/10 (Airbnb: {round(e_airbnb, 1)}).")
                         st.rerun()

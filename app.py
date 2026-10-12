@@ -77,13 +77,19 @@ def save_data(data_list):
 def evaluate_ideal_criteria(prop):
     reasons = []
 
-    # 1. מיקום - אפוקורונס (הרחבת זיהוי כפרים כולל קפלאס)
+    # 1. מיקום - אפוקורונס (בדיקה מקיפה של כל כפרי המפה)
     loc_text = f"{prop.get('region', '')} {prop.get('city_town', '')} {prop.get('village', '')} {prop.get('summary', '')} {prop.get('property_title', '')}".lower()
+    
     apokoronas_villages = [
-        "apokoronas", "אפוקורונס", "kefalas", "קפלאס", "קפאלאס", 
-        "kokkino chorio", "קוקינו", "plaka", "פלאקה", "almyrida", "אלמירידה", 
-        "vamos", "ואמוס", "georgioupolis", "גאורגיופוליס", "kavros", "קאברוס", "kalyves", "קליבס"
+        "apokoronas", "אפוקורונס", "apokoronas", 
+        "kalyves", "קליבס", "קאליבס", "tsivaras", "ציוואראס", "stylos", "סטילוס", "provarma", "פרווארמה", "armenoi", "ארמנוי", "ramni", "ראמני", "neo chorio", "ניאו כוריו",
+        "almyrida", "אלמירידה", "plaka", "פלאקה", "kokkino chorio", "קוקינו", "kambia", "קמביה", "aspro", "אספרו", "drapanos", "דראפנוס", "palailoni", "פלאילוני", "vamos", "ואמוס", "gavalochori", "גובאלוכורי", "xirosterni", "קסירוסטרני", "kefalas", "קפלאס", "קפאלאס", "likotinarea", "ליקוטינארה", "sellia", "סליה",
+        "paidochori", "פאיידוכורי", "kares", "קארס", "pemonia", "פמוניה", "meidochori", "מיידוכורי", "fres", "פרס",
+        "nippos", "ניפוס", "vryses", "וריסס", "kalamitsi alexandrou", "קלאמיצי אלכסנדרו", "kalamitsi amygdali", "קלאמיצי אמגידאלי", "emprosneros", "אמפרוסנרוס", "vatoudiaris", "ואטוודיאריס", "kryonerida", "קריונרידה", "vafe", "ואפה", "vatos", "ואטוס",
+        "asprouliani", "אספרוליאני", "filaki", "פילאקי", "metamorfosi", "מטמורפוסי", "mouri", "מורי", "mathes", "מאתס", "georgioupoli", "georgioupolis", "גאורגיופוליס", "kavros", "קאברוס", "lake kournas", "kournas", "קורנאס", "kastellos", "קסטלוס",
+        "maza", "מזה", "alikampos", "אליקמפוס", "asi gonia", "אסי גוניה"
     ]
+    
     is_apokoronas = any(v in loc_text for v in apokoronas_villages)
     if not is_apokoronas:
         reasons.append("מחוץ לאזור אפוקורונס")
@@ -93,7 +99,7 @@ def evaluate_ideal_criteria(prop):
     if bedrooms < 3:
         reasons.append(f"פחות מ-3 חדרי שינה ({bedrooms} חדרים)")
 
-    # 3. שטח בנוי - 80 מ"ר מינימום (אם הנתון 0 אך יש 3 חדרים -> מאושר!)
+    # 3. שטח בנוי - 80 מ"ר מינימום (אם הנתון חסר אך יש 3+ חדרים -> מאושר!)
     built_sqm = float(prop.get("built_sqm", 0) or 0)
     if 0 < built_sqm < 80:
         reasons.append(f"שטח בנוי מתחת ל-80 מ\"ר ({built_sqm} מ\"ר)")
@@ -103,7 +109,7 @@ def evaluate_ideal_criteria(prop):
     if physical_score < 7.0:
         reasons.append("דורש שיפוץ/שדרוג")
 
-    # 5. חצר/מגרש של מינ' 200 מ"ר (אם לא מצוין בבירור -> מאושר!)
+    # 5. חצר/מגרש של מינ' 200 מ"ר (אם הנתון חסר במודעה -> מאושר!)
     plot_sqm = float(prop.get("plot_sqm", 0) or 0)
     if 0 < plot_sqm < 200:
         reasons.append(f"חצר קטנה מ-200 מ\"ר ({plot_sqm} מ\"ר)")
@@ -223,11 +229,11 @@ st.caption("הוסיפו צילומי מסך או טקסט של מודעה, וה
 
 with st.expander("🎯 קריטריוני הנכס האידאלי לרשימת המיקוד (לחץ לצפייה)", expanded=False):
     st.markdown("""
-    * **📍 מיקום:** אזור **אפוקורונס** (Apokoronas - כולל קפלאס, קוקינו חוריו, פלאקה, אלמירידה, ואמוס, גאורגיופוליס וקליבס).
+    * **📍 מיקום:** כל כפרי מחוז **אפוקורונס** (Apokoronas - כולל קליבס, אלמירידה, פלאקה, קוקינו חוריו, ואמוס, גובאלוכורי, קפלאס, וריסס, גאורגיופוליס, קאברוס, קורנאס וכל כפרי המחוז).
     * **🛏️ חדרי שינה:** מינימום **3 חדרי שינה**.
     * **📐 שטח בנוי:** מינימום **80 מ"ר**.
     * **🛠️ מצב הנכס:** מוכן לכניסה / ללא צורך בשיפוץ (ציון פיזי $\ge 7.0$).
-    * **🌳 שטח חצר:** מינימום **200 מ"ר** (נכס ללא נתון חצר מפורש ייכנס גם הוא!).
+    * **🌳 שטח חצר:** מינימום **200 מ"ר** (נכס ללא נתון חצר מפורש במודעה ייכנס גם הוא!).
     * **🏊‍♂️ בריכה:** **חובה**.
     * **🌊 נוף לים:** מעניק **בונוס תיעדוף בציון**.
     """)

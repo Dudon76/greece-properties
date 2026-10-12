@@ -72,6 +72,47 @@ def save_data(data_list):
         st.error(f"שגיאה בשמירה ל-GitHub: {res.json().get('message')}")
 
 # ==========================================
+# פונקציית בדיקת התאמה לקריטריוני התיעדוף
+# ==========================================
+def evaluate_ideal_criteria(prop):
+    reasons = []
+
+    # 1. מיקום - אפוקורונס (בדיקה גמישה לשם האזור/עיר/כפר)
+    loc_text = f"{prop.get('region', '')} {prop.get('city_town', '')} {prop.get('village', '')}".lower()
+    apokoronas_villages = ["apokoronas", "אפוקורונס", "kokkino chorio", "קוקינו", "plaka", "פלאקה", "almyrida", "אלמירידה", "vamos", "ואמוס", "georgioupolis", "גאורגיופוליס", "kavros", "קאברוס", "kalyves", "קליבס"]
+    is_apokoronas = any(v in loc_text for v in apokoronas_villages)
+    if not is_apokoronas:
+        reasons.append("מחוץ לאזור אפוקורונס")
+
+    # 2. גודל הבית - 3 חדרי שינה מינימום
+    bedrooms = int(prop.get("bedrooms", 0) or 0)
+    if bedrooms < 3:
+        reasons.append(f"פחות מ-3 חדרי שינה ({bedrooms} חדרים)")
+
+    # 3. שטח בנוי - 80 מ"ר מינימום
+    built_sqm = float(prop.get("built_sqm", 0) or 0)
+    if built_sqm < 80:
+        reasons.append(f"שטח בנוי מתחת ל-80 מ\"ר ({built_sqm} מ\"ר)")
+
+    # 4. מצב הנכס - מוכן לכניסה (ציון פיזי >= 7.5)
+    physical_score = float(prop.get("physical_score", 5.0) or 5.0)
+    if physical_score < 7.5:
+        reasons.append("דורש שיפוץ/שדרוג (ציון פיזי מתחת ל-7.5)")
+
+    # 5. חצר/מגרש של מינ' 200 מ"ר (אם הנתון קיים וקטן מ-200 -> פסילה. אם 0/חסר -> מאושר!)
+    plot_sqm = float(prop.get("plot_sqm", 0) or 0)
+    if 0 < plot_sqm < 200:
+        reasons.append(f"חצר קטנה מ-200 מ\"ר ({plot_sqm} מ\"ר)")
+
+    # 6. חובת בריכה
+    has_pool = bool(prop.get("has_pool", False))
+    if not has_pool:
+        reasons.append("ללא בריכה")
+
+    is_ideal = len(reasons) == 0
+    return is_ideal, reasons
+
+# ==========================================
 # פונקציות חישוב פיננסיות לנכס
 # ==========================================
 def calculate_financials(prop):
@@ -176,6 +217,17 @@ def analyze_with_gemini(user_text=None, image_files=None):
 st.title("🏠 מנוע השוואת נכסים ביוון - לוח משפחתי")
 st.caption("הוסיפו צילומי מסך או טקסט של מודעה, וה-AI יחלץ את הנתונים, ידרג אותה ויחשב את התשואה והעלויות הנילוות.")
 
+with st.expander("🎯 קריטריוני הנכס ה"אידאלי" לרשימת המיקוד (לחץ לצפייה)", expanded=False):
+    st.markdown("""
+    * **📍 מיקום:** אזור **אפוקורונס** (Apokoronas) בלבד.
+    * **🛏️ חדרי שינה:** מינימום **3 חדרי שינה**.
+    * **📐 שטח בנוי:** מינימום **80 מ"ר**.
+    * **🛠️ מצב הנכס:** מוכן לכניסה / ללא צורך בשיפוץ (ציון פיזי $\ge 7.5$).
+    * **🌳 שטח חצר:** מינימום **200 מ"ר** (נכס ללא נתון חצר מפורש ייכנס גם הוא!).
+    * **🏊‍♂️ בריכה:** **חובה**.
+    * **🌊 נוף לים:** מעניק **בונוס תיעדוף בציון**.
+    """)
+
 with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=True):
     col_input1, col_input2 = st.columns(2)
     
@@ -225,49 +277,70 @@ st.divider()
 # ==========================================
 # 4. הצגת טבלת ההשוואה, עריכה ומחיקה
 # ==========================================
-st.subheader("📋 טבלת השוואת נכסים (כולל ניתוח תשואה והשקעה נדרשת)")
-
 st.session_state.properties = load_data()
 
 if not st.session_state.properties:
     st.info("עדיין לא הוספו נכסים. השתמשו בטופס למעלה כדי להוסיף את הנכס הראשון!")
 else:
+    # עיבוד וסיווג כל הנכסים
     enriched_props = []
     for p in st.session_state.properties:
-        p["total_score"] = round(
-            (0.4 * float(p.get("physical_score", 5.0) or 5.0)) + 
-            (0.3 * float(p.get("location_score", 5.0) or 5.0)) + 
-            (0.3 * float(p.get("airbnb_score", 5.0) or 5.0)), 1
-        )
+        is_ideal, reasons = evaluate_ideal_criteria(p)
+        
+        phys = float(p.get("physical_score", 5.0) or 5.0)
+        loc = float(p.get("location_score", 5.0) or 5.0)
+        airbnb = float(p.get("airbnb_score", 5.0) or 5.0)
+        
+        # בונוס נוף לים לנכסים אידאליים
+        if bool(p.get("sea_view", False)):
+            airbnb = min(10.0, airbnb + 0.3)
+            
+        base_score = (0.4 * phys) + (0.3 * loc) + (0.3 * airbnb)
+        
+        # ענישה בציון (-2.0) לנכסים שלא עומדים בקריטריוני החובה
+        final_score = round(base_score if is_ideal else max(1.0, base_score - 2.0), 1)
+        
+        p["is_ideal"] = is_ideal
+        p["unmet_reasons"] = reasons
+        p["total_score"] = final_score
+        
         fin = calculate_financials(p)
         merged = {**p, **fin}
         enriched_props.append(merged)
 
-    df = pd.DataFrame(enriched_props)
-    if "total_score" in df.columns:
-        df = df.sort_values(by="total_score", ascending=False)
+    df_all = pd.DataFrame(enriched_props)
     
+    # פיצול לרשימת מיקוד ולרשימה משנית
+    df_target = df_all[df_all["is_ideal"] == True].sort_values(by="total_score", ascending=False)
+    df_secondary = df_all[df_all["is_ideal"] == False].sort_values(by="total_score", ascending=False)
+
+    # הורדת Excel
     excel_file = "greece_properties_comparison.xlsx"
-    df.to_excel(excel_file, index=False)
+    df_all.to_excel(excel_file, index=False)
     with open(excel_file, "rb") as f:
         st.download_button(
-            label="📥 הורד טבלה מעודכנת לקובץ Excel (כולל חישובי תשואה ועלויות)",
+            label="📥 הורד טבלה מעודכנת לקובץ Excel (כולל סיווג וחישובי תשואה)",
             data=f,
             file_name="Greece_Properties_Comparison.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-    
-    for idx, row in df.iterrows():
+
+    # פונקציית עזר להצגת הכרטיסיות
+    def render_property_card(row, is_target=True):
         fin = calculate_financials(row)
-        prop_id = row.get("id", idx)
+        prop_id = row.get("id")
         
         with st.container(border=True):
             col1, col2, col3, col4 = st.columns([3, 2.5, 2.5, 1.2])
             
             with col1:
+                badge = "🎯 **נכס מיקוד אידאלי**" if is_target else "⚠️ **נכס בעדיפות משנית**"
                 st.markdown(f"### **{row.get('property_title', 'נכס')}**")
+                st.caption(badge)
                 st.write(f"📍 **מיקום:** {row.get('region', '')}, {row.get('city_town', '')} ({row.get('village', '')})")
                 st.write(f"📝 **תקציר:** {row.get('summary', '')}")
+                if not is_target and row.get('unmet_reasons'):
+                    st.warning("❌ **סיבות לחוסר התאמה:** " + ", ".join(row.get('unmet_reasons')))
                 st.write(f"👤 **התווסף ע\"י:** {row.get('added_by', '')}")
                 
             with col2:
@@ -294,7 +367,6 @@ else:
                     st.markdown(f"[🔗 מודעה מקורית]({url_val})")
                 
                 st.write("")
-                
                 if st.button("🗑️ מחק", key=f"del_{prop_id}"):
                     updated_props = [p for p in st.session_state.properties if p.get("id") != prop_id]
                     save_data(updated_props)
@@ -323,26 +395,12 @@ else:
                         e_phys = st.slider("ציון פיזי (1-10):", 1.0, 10.0, float(row.get('physical_score', 5.0) or 5.0), 0.1)
                         e_loc = st.slider("ציון מיקום (1-10):", 1.0, 10.0, float(row.get('location_score', 5.0) or 5.0), 0.1)
                         e_airbnb = st.slider("ציון Airbnb (1-10):", 1.0, 10.0, float(row.get('airbnb_score', 5.0) or 5.0), 0.1)
-                        auto_recalc = st.checkbox("⚡ שכלל ציונים אוטומטית לפי בריכה/נוף לים/חדרים", value=True)
 
                     e_summary = st.text_area("תקציר/הערות נוספות:", value=str(row.get('summary', '')))
 
                     submit_edit = st.form_submit_button("💾 שמור שינויים ועדכן נכס")
                     
                     if submit_edit:
-                        if auto_recalc:
-                            # חישוב דינמי של הבונוסים בציון
-                            if e_has_pool:
-                                e_airbnb = min(10.0, max(e_airbnb, 8.5))
-                                e_phys = min(10.0, max(e_phys, 8.2))
-                            if e_sea_view:
-                                e_airbnb = min(10.0, e_airbnb + 0.3)
-                                e_loc = min(10.0, e_loc + 0.3)
-                            if e_bedrooms >= 3:
-                                e_airbnb = min(10.0, e_airbnb + 0.3)
-                                
-                        new_total = round((0.4 * e_phys) + (0.3 * e_loc) + (0.3 * e_airbnb), 1)
-                        
                         all_props = load_data()
                         for p in all_props:
                             if p.get("id") == prop_id:
@@ -360,11 +418,28 @@ else:
                                 p["physical_score"] = round(e_phys, 1)
                                 p["location_score"] = round(e_loc, 1)
                                 p["airbnb_score"] = round(e_airbnb, 1)
-                                p["total_score"] = new_total
                                 p["summary"] = e_summary
                                 break
                         
                         save_data(all_props)
                         st.session_state.properties = all_props
-                        st.success(f"הנכס עודכן! הציון החדש שחושב הוא {new_total}/10 (Airbnb: {round(e_airbnb, 1)}).")
+                        st.success("הנכס עודכן והסיווג חושב מחדש!")
                         st.rerun()
+
+    # --- הצגת רשימת המיקוד ---
+    st.markdown("## 🎯 רשימת מיקוד - נכסים אידאליים (עונים על כל 6 הקריטריונים)")
+    if df_target.empty:
+        st.warning("כעת אין נכסים בלוח שעונים על כל 6 קריטריוני החובה. בדקו את הרשימה המשנית למטה.")
+    else:
+        for idx, row in df_target.iterrows():
+            render_property_card(row, is_target=True)
+
+    st.divider()
+
+    # --- הצגת נכסים בעדיפות משנית ---
+    st.markdown("## ⚠️ נכסים בעלי עניין (עדיפות משנית / חוסר התאמה לקריטריון)")
+    if df_secondary.empty:
+        st.info("כל הנכסים בלוח עונים על קריטריוני המיקוד!")
+    else:
+        for idx, row in df_secondary.iterrows():
+            render_property_card(row, is_target=False)

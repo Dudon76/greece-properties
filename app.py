@@ -77,9 +77,13 @@ def save_data(data_list):
 def evaluate_ideal_criteria(prop):
     reasons = []
 
-    # 1. מיקום - אפוקורונס (בדיקה גמישה לשם האזור/עיר/כפר)
-    loc_text = f"{prop.get('region', '')} {prop.get('city_town', '')} {prop.get('village', '')}".lower()
-    apokoronas_villages = ["apokoronas", "אפוקורונס", "kokkino chorio", "קוקינו", "plaka", "פלאקה", "almyrida", "אלמירידה", "vamos", "ואמוס", "georgioupolis", "גאורגיופוליס", "kavros", "קאברוס", "kalyves", "קליבס"]
+    # 1. מיקום - אפוקורונס (הרחבת זיהוי כפרים כולל קפלאס)
+    loc_text = f"{prop.get('region', '')} {prop.get('city_town', '')} {prop.get('village', '')} {prop.get('summary', '')} {prop.get('property_title', '')}".lower()
+    apokoronas_villages = [
+        "apokoronas", "אפוקורונס", "kefalas", "קפלאס", "קפאלאס", 
+        "kokkino chorio", "קוקינו", "plaka", "פלאקה", "almyrida", "אלמירידה", 
+        "vamos", "ואמוס", "georgioupolis", "גאורגיופוליס", "kavros", "קאברוס", "kalyves", "קליבס"
+    ]
     is_apokoronas = any(v in loc_text for v in apokoronas_villages)
     if not is_apokoronas:
         reasons.append("מחוץ לאזור אפוקורונס")
@@ -89,17 +93,17 @@ def evaluate_ideal_criteria(prop):
     if bedrooms < 3:
         reasons.append(f"פחות מ-3 חדרי שינה ({bedrooms} חדרים)")
 
-    # 3. שטח בנוי - 80 מ\"ר מינימום
+    # 3. שטח בנוי - 80 מ"ר מינימום (אם הנתון 0 אך יש 3 חדרים -> מאושר!)
     built_sqm = float(prop.get("built_sqm", 0) or 0)
-    if built_sqm < 80:
+    if 0 < built_sqm < 80:
         reasons.append(f"שטח בנוי מתחת ל-80 מ\"ר ({built_sqm} מ\"ר)")
 
-    # 4. מצב הנכס - מוכן לכניסה (ציון פיזי >= 7.5)
+    # 4. מצב הנכס - מוכן לכניסה (ציון פיזי >= 7.0)
     physical_score = float(prop.get("physical_score", 5.0) or 5.0)
-    if physical_score < 7.5:
-        reasons.append("דורש שיפוץ/שדרוג (ציון פיזי מתחת ל-7.5)")
+    if physical_score < 7.0:
+        reasons.append("דורש שיפוץ/שדרוג")
 
-    # 5. חצר/מגרש של מינ' 200 מ\"ר (אם הנתון קיים וקטן מ-200 -> פסילה. אם 0/חסר -> מאושר!)
+    # 5. חצר/מגרש של מינ' 200 מ"ר (אם לא מצוין בבירור -> מאושר!)
     plot_sqm = float(prop.get("plot_sqm", 0) or 0)
     if 0 < plot_sqm < 200:
         reasons.append(f"חצר קטנה מ-200 מ\"ר ({plot_sqm} מ\"ר)")
@@ -125,7 +129,7 @@ def calculate_financials(prop):
     renovation_costs = 15000 + max(0, (10 - physical_score)) * 10000
     total_investment = price + closing_costs + renovation_costs
     
-    enfia = built_sqm * 3.0
+    enfia = (built_sqm if built_sqm > 0 else 100.0) * 3.0
     maintenance_and_insurance = 1200.0
     annual_fixed_expenses = enfia + maintenance_and_insurance
     
@@ -219,10 +223,10 @@ st.caption("הוסיפו צילומי מסך או טקסט של מודעה, וה
 
 with st.expander("🎯 קריטריוני הנכס האידאלי לרשימת המיקוד (לחץ לצפייה)", expanded=False):
     st.markdown("""
-    * **📍 מיקום:** אזור **אפוקורונס** (Apokoronas) בלבד.
+    * **📍 מיקום:** אזור **אפוקורונס** (Apokoronas - כולל קפלאס, קוקינו חוריו, פלאקה, אלמירידה, ואמוס, גאורגיופוליס וקליבס).
     * **🛏️ חדרי שינה:** מינימום **3 חדרי שינה**.
     * **📐 שטח בנוי:** מינימום **80 מ"ר**.
-    * **🛠️ מצב הנכס:** מוכן לכניסה / ללא צורך בשיפוץ (ציון פיזי $\ge 7.5$).
+    * **🛠️ מצב הנכס:** מוכן לכניסה / ללא צורך בשיפוץ (ציון פיזי $\ge 7.0$).
     * **🌳 שטח חצר:** מינימום **200 מ"ר** (נכס ללא נתון חצר מפורש ייכנס גם הוא!).
     * **🏊‍♂️ בריכה:** **חובה**.
     * **🌊 נוף לים:** מעניק **בונוס תיעדוף בציון**.
@@ -282,7 +286,6 @@ st.session_state.properties = load_data()
 if not st.session_state.properties:
     st.info("עדיין לא הוספו נכסים. השתמשו בטופס למעלה כדי להוסיף את הנכס הראשון!")
 else:
-    # עיבוד וסיווג כל הנכסים
     enriched_props = []
     for p in st.session_state.properties:
         is_ideal, reasons = evaluate_ideal_criteria(p)
@@ -291,13 +294,10 @@ else:
         loc = float(p.get("location_score", 5.0) or 5.0)
         airbnb = float(p.get("airbnb_score", 5.0) or 5.0)
         
-        # בונוס נוף לים לנכסים אידאליים
         if bool(p.get("sea_view", False)):
             airbnb = min(10.0, airbnb + 0.3)
             
         base_score = (0.4 * phys) + (0.3 * loc) + (0.3 * airbnb)
-        
-        # ענישה בציון (-2.0) לנכסים שלא עומדים בקריטריוני החובה
         final_score = round(base_score if is_ideal else max(1.0, base_score - 2.0), 1)
         
         p["is_ideal"] = is_ideal
@@ -310,11 +310,9 @@ else:
 
     df_all = pd.DataFrame(enriched_props)
     
-    # פיצול לרשימת מיקוד ולרשימה משנית
     df_target = df_all[df_all["is_ideal"] == True].sort_values(by="total_score", ascending=False)
     df_secondary = df_all[df_all["is_ideal"] == False].sort_values(by="total_score", ascending=False)
 
-    # הורדת Excel
     excel_file = "greece_properties_comparison.xlsx"
     df_all.to_excel(excel_file, index=False)
     with open(excel_file, "rb") as f:
@@ -325,7 +323,6 @@ else:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-    # פונקציית עזר להצגת הכרטיסיות
     def render_property_card(row, is_target=True):
         fin = calculate_financials(row)
         prop_id = row.get("id")
@@ -374,7 +371,6 @@ else:
                     st.warning("הנכס נמחק.")
                     st.rerun()
 
-            # טופס עריכה ועדכון נתונים
             with st.expander(f"✏️ ערוך/עדכן נתונים עבור נכס #{prop_id}"):
                 with st.form(key=f"edit_form_{prop_id}"):
                     ec1, ec2, ec3 = st.columns(3)

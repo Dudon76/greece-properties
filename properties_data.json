@@ -115,7 +115,7 @@
     "bedrooms": 2,
     "bathrooms": 1,
     "has_pool": true,
-    "sea_view": false,
+    "sea_view": true,
     "physical_score": 7.8,
     "location_score": 7.5,
     "airbnb_score": 8.2,

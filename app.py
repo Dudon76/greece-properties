@@ -72,16 +72,16 @@ def save_data(data_list):
         st.error(f"שגיאה בשמירה ל-GitHub: {res.json().get('message')}")
 
 # ==========================================
-# פונקציית בדיקת התאמה לקריטריוני התיעדוף
+# פונקציית בדיקת התאמה לקריטריוני התיעדוף החדשים
 # ==========================================
 def evaluate_ideal_criteria(prop):
     reasons = []
 
-    # 1. מיקום - אפוקורונס (בדיקה מקיפה של כל כפרי המפה)
+    # 1. מיקום - אפוקורונס
     loc_text = f"{prop.get('region', '')} {prop.get('city_town', '')} {prop.get('village', '')} {prop.get('summary', '')} {prop.get('property_title', '')}".lower()
     
     apokoronas_villages = [
-        "apokoronas", "אפוקורונס", "apokoronas", 
+        "apokoronas", "אפוקורונס", 
         "kalyves", "קליבס", "קאליבס", "tsivaras", "ציוואראס", "stylos", "סטילוס", "provarma", "פרווארמה", "armenoi", "ארמנוי", "ramni", "ראמני", "neo chorio", "ניאו כוריו",
         "almyrida", "אלמירידה", "plaka", "פלאקה", "kokkino chorio", "קוקינו", "kambia", "קמביה", "aspro", "אספרו", "drapanos", "דראפנוס", "palailoni", "פלאילוני", "vamos", "ואמוס", "gavalochori", "גובאלוכורי", "xirosterni", "קסירוסטרני", "kefalas", "קפלאס", "קפאלאס", "likotinarea", "ליקוטינארה", "sellia", "סליה",
         "paidochori", "פאיידוכורי", "kares", "קארס", "pemonia", "פמוניה", "meidochori", "מיידוכורי", "fres", "פרס",
@@ -99,7 +99,7 @@ def evaluate_ideal_criteria(prop):
     if bedrooms < 3:
         reasons.append(f"פחות מ-3 חדרי שינה ({bedrooms} חדרים)")
 
-    # 3. שטח בנוי - 80 מ"ר מינימום (אם הנתון חסר אך יש 3+ חדרים -> מאושר!)
+    # 3. שטח בנוי - 80 מ"ר מינימום (אם חסר במודעה אך יש 3+ חדרים -> מאושר!)
     built_sqm = float(prop.get("built_sqm", 0) or 0)
     if 0 < built_sqm < 80:
         reasons.append(f"שטח בנוי מתחת ל-80 מ\"ר ({built_sqm} מ\"ר)")
@@ -114,10 +114,11 @@ def evaluate_ideal_criteria(prop):
     if 0 < plot_sqm < 200:
         reasons.append(f"חצר קטנה מ-200 מ\"ר ({plot_sqm} מ\"ר)")
 
-    # 6. חובת בריכה
+    # 6. בדיקת חובת לפחות אחד מהשניים: בריכה או נוף לים
     has_pool = bool(prop.get("has_pool", False))
-    if not has_pool:
-        reasons.append("ללא בריכה")
+    sea_view = bool(prop.get("sea_view", False))
+    if not has_pool and not sea_view:
+        reasons.append("אין בריכה ואין נוף לים (נדרש לפחות אחד)")
 
     is_ideal = len(reasons) == 0
     return is_ideal, reasons
@@ -229,13 +230,14 @@ st.caption("הוסיפו צילומי מסך או טקסט של מודעה, וה
 
 with st.expander("🎯 קריטריוני הנכס האידאלי לרשימת המיקוד (לחץ לצפייה)", expanded=False):
     st.markdown("""
-    * **📍 מיקום:** כל כפרי מחוז **אפוקורונס** (Apokoronas - כולל קליבס, אלמירידה, פלאקה, קוקינו חוריו, ואמוס, גובאלוכורי, קפלאס, וריסס, גאורגיופוליס, קאברוס, קורנאס וכל כפרי המחוז).
+    * **📍 מיקום:** כל כפרי מחוז **אפוקורונס** (Apokoronas).
     * **🛏️ חדרי שינה:** מינימום **3 חדרי שינה**.
     * **📐 שטח בנוי:** מינימום **80 מ"ר**.
     * **🛠️ מצב הנכס:** מוכן לכניסה / ללא צורך בשיפוץ (ציון פיזי $\ge 7.0$).
     * **🌳 שטח חצר:** מינימום **200 מ"ר** (נכס ללא נתון חצר מפורש במודעה ייכנס גם הוא!).
-    * **🏊‍♂️ בריכה:** **חובה**.
-    * **🌊 נוף לים:** מעניק **בונוס תיעדוף בציון**.
+    * **🏊‍♂️ בריכה / 🌊 נוף לים:** **לפחות אחד מהם נדרש!**
+      * **אם יש בריכה:** תוספת של **+1.0 נקודה** לציון.
+      * **אם יש נוף לים:** תוספת של **+1.0 נקודה** לציון.
     """)
 
 with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=True):
@@ -248,7 +250,7 @@ with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=
         
     with col_input2:
         uploaded_images = st.file_uploader(
-            "📷 צילומי מסך של המודעה (ניתן לבחור מספר תמונות יחד):", 
+            "📷 צילומי מסך של המודעה (ניתן להדביק ב-Ctrl+V או לבחור קבצים):", 
             type=["jpg", "jpeg", "png"], 
             accept_multiple_files=True,
             key="multi_img_uploader"
@@ -300,8 +302,13 @@ else:
         loc = float(p.get("location_score", 5.0) or 5.0)
         airbnb = float(p.get("airbnb_score", 5.0) or 5.0)
         
+        # תוספות ניקוד (+1.0) עבור בריכה ונוף לים
+        if bool(p.get("has_pool", False)):
+            phys = min(10.0, phys + 1.0)
+            airbnb = min(10.0, airbnb + 1.0)
         if bool(p.get("sea_view", False)):
-            airbnb = min(10.0, airbnb + 0.3)
+            loc = min(10.0, loc + 1.0)
+            airbnb = min(10.0, airbnb + 1.0)
             
         base_score = (0.4 * phys) + (0.3 * loc) + (0.3 * airbnb)
         final_score = round(base_score if is_ideal else max(1.0, base_score - 2.0), 1)
@@ -429,9 +436,9 @@ else:
                         st.rerun()
 
     # --- הצגת רשימת המיקוד ---
-    st.markdown("## 🎯 רשימת מיקוד - נכסים אידאליים (עונים על כל 6 הקריטריונים)")
+    st.markdown("## 🎯 רשימת מיקוד - נכסים אידאליים")
     if df_target.empty:
-        st.warning("כעת אין נכסים בלוח שעונים על כל 6 קריטריוני החובה. בדקו את הרשימה המשנית למטה.")
+        st.warning("כעת אין נכסים בלוח שעונים על קריטריוני המיקוד. בדקו את הרשימה המשנית למטה.")
     else:
         for idx, row in df_target.iterrows():
             render_property_card(row, is_target=True)

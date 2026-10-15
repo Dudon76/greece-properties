@@ -165,14 +165,14 @@ def calculate_financials(prop):
 # 2. מנוע AI עם מנגנון Fallback מרובה מודלים
 # ==========================================
 SYSTEM_INSTRUCTION = """
-אתה מומחה נדל"ן ומעריך נכסים ביוון. תפקידך לחלץ מודעת נדל"ן (מטקסט, קישור או תמונות/צילומי מסך מרובים) ולהחזיר אך ורק אובייקט JSON תקני ללא שום דיבורים נוספים.
-אם מועלות מספר תמונות, חבר את המידע מכל התמונות יחד לכדי ניתוח של נכס אחד.
+אתה מומחה נדל"ן ומעריך נכסים ביוון. תפקידך לחלץ מודעת נדל"ן (מטקסט באנגלית/עברית, קישור או תמונות/צילומי מסך מרובים) ולהחזיר אך ורק אובייקט JSON תקני ללא שום דיבורים נוספים.
+אם מועלות מספר תמונות או טקסט באנגלית, תרגם וחלץ את המידע לכדי ניתוח בעברית.
 
 השדות ב-JSON חייבים להיות:
 {
   "property_title": "כותרת קצרה",
   "region": "אזור/אי (למשל כרתים)",
-  "city_town": "עיר/מחוז",
+  "city_town": "עיר/מחוז (למשל חאניה)",
   "village": "כפר/שכונה",
   "price_eur": 0,
   "built_sqm": 0,
@@ -184,16 +184,12 @@ SYSTEM_INSTRUCTION = """
   "physical_score": 5.0,
   "location_score": 5.0,
   "airbnb_score": 5.0,
-  "total_score": 5.0,
   "summary": "תקציר קצר בעברית"
 }
 אם נתון מסוים חסר, שער באופן הגיוני או שים 0/false.
-חוקי ניקוד (1-10):
-total_score = (0.4 * physical_score) + (0.3 * location_score) + (0.3 * airbnb_score)
 """
 
 def analyze_with_gemini_with_fallback(user_text=None, image_files=None):
-    # רשימת מודלים לנסות לפי סדר עדיפויות
     models_to_try = [
         "gemini-3.8-flash",
         "gemini-1.5-flash",
@@ -210,7 +206,6 @@ def analyze_with_gemini_with_fallback(user_text=None, image_files=None):
     if user_text:
         contents.append(user_text)
         
-    last_error = None
     for model_name in models_to_try:
         try:
             model = genai.GenerativeModel(
@@ -227,15 +222,11 @@ def analyze_with_gemini_with_fallback(user_text=None, image_files=None):
             raw_text = raw_text.strip()
             return json.loads(raw_text)
         except Exception as e:
-            last_error = e
-            # אם שגיאת 429 / Quota, עוברים מיידית למודל הבא ברשימה
             if "429" in str(e) or "quota" in str(e).lower():
                 continue
             else:
-                # אם שגיאה אחרת, ניתן לנסות גם מודל חלופי
                 continue
 
-    # אם כל המודלים נכשלו במכסה, מחזירים None כדי להפעיל טופס ידני
     return None
 
 # ==========================================
@@ -258,13 +249,13 @@ with st.expander("🎯 קריטריוני הנכס האידאלי לרשימת �
       * **אם יש נוף לים:** תוספת של **+1.0 נקודה** לציון.
     """)
 
-with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=True):
+with st.expander("➕ הוספת נכס חדש (אוטומטי או ידני)", expanded=True):
     col_input1, col_input2 = st.columns(2)
     
     with col_input1:
         added_by = st.selectbox("שם בן המשפחה המוסיף:", ["דודי", "גל", "מאיר/פזית", "אחר"])
         property_url = st.text_input("🔗 קישור למודעה / פוסט (לשמירה וחזרה ישירה לנכס):")
-        property_text = st.text_area("טקסט המודעה / הערות נוספות:", placeholder="הדבק כאן טקסט במידת הצורך...")
+        property_text = st.text_area("טקסט המודעה (בעברית או באנגלית):", placeholder="הדבק כאן את טקסט המודעה...")
         
     with col_input2:
         uploaded_images = st.file_uploader(
@@ -280,7 +271,13 @@ with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=
                 with cols[idx % 4]:
                     st.image(img, use_container_width=True)
 
-    if st.button("🚀 נתח והוסף נכס ללוח", use_container_width=True):
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        btn_auto = st.button("🚀 נתח והוסף אוטומטית ללוח", use_container_width=True)
+    with col_btn2:
+        btn_manual_toggle = st.button("✏️ פתח טופס הזנה/עריכה ידנית (כולל חילוץ אוטומטי לשדות)", use_container_width=True)
+
+    if btn_auto:
         if not property_text and not uploaded_images and not property_url:
             st.error("יש לספק לפחות צילום מסך אחד, טקסט או קישור למודעה.")
         else:
@@ -301,34 +298,52 @@ with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=
                     st.rerun()
                 else:
                     st.session_state["show_manual_add"] = True
-                    st.warning("⚠️ המכסה החינמית היומית ב-API של Gemini הגיעה למקסימום. ניתן להזין את הפרטים בטופס הידני למטה והנכס יישמר כרגיל!")
+                    st.warning("⚠️ המכסה החינמית ב-API של Gemini בשיא. הטופס הידני למטה נפתח עם השדות המיועדים!")
+
+    if btn_manual_toggle:
+        st.session_state["show_manual_add"] = True
 
 # ==========================================
-# 3.1 טופס הזנה ידנית במידה וה-API במכסה
+# 3.1 טופס הזנה ידנית חכם (מחלץ שדות אוטומטית)
 # ==========================================
 if st.session_state.get("show_manual_add", False):
-    st.info("📝 **טופס הזנת נכס ידנית (מעקף מכסת API):**")
+    st.divider()
+    st.info("📝 **טופס הזנת נכס ידנית / חצי-אוטומטית:**")
+    st.caption("תוכל ללחוץ על '🪄 חלץ ומלא שדות מהטקסט/תמונות' כדי שה-AI יאכלס את שדות הטופס מראש, או למלא את הפרטים בעצמך.")
+    
+    if st.button("🪄 חלץ ומלא שדות אוטומטית מהטקסט/התמונות למעלה"):
+        with st.spinner("מחלץ נתונים לשדות הטופס..."):
+            extracted = analyze_with_gemini_with_fallback(user_text=property_text, image_files=uploaded_images)
+            if extracted:
+                st.session_state["m_extracted"] = extracted
+                st.success("הנתונים חולצו בהצלחה לשדות הטופס!")
+            else:
+                st.error("לא ניתן היה לחלץ נתונים אוטומטית בשל עומס API. אנא הזן את הנתונים ידנית בשדות.")
+
+    ext = st.session_state.get("m_extracted", {})
+
     with st.form(key="manual_add_form"):
         mc1, mc2, mc3 = st.columns(3)
         with mc1:
-            m_title = st.text_input("כותרת/שם הנכס:", value="וילה באפוקורונס")
-            m_price = st.number_input("מחיר ב-€:", value=250000, step=5000)
-            m_built = st.number_input("שטח בנוי (מ\"ר):", value=100, step=5)
-            m_plot = st.number_input("שטח מגרש (מ\"ר):", value=300, step=10)
+            m_title = st.text_input("כותרת/שם הנכס:", value=ext.get("property_title", "וילה באפוקורונס"))
+            m_url = st.text_input("🔗 קישור למודעה / פוסט:", value=property_url if property_url else ext.get("url", "N/A"))
+            m_price = st.number_input("מחיר ב-€:", value=int(ext.get("price_eur", 250000) or 250000), step=5000)
+            m_built = st.number_input("שטח בנוי (מ\"ר):", value=int(ext.get("built_sqm", 100) or 100), step=5)
+            m_plot = st.number_input("שטח מגרש (מ\"ר):", value=int(ext.get("plot_sqm", 300) or 300), step=10)
         with mc2:
-            m_region = st.text_input("אזור/אי:", value="כרתים")
-            m_city = st.text_input("עיר/מחוז:", value="חאניה")
-            m_village = st.text_input("כפר/שכונה:", value="קליבס")
-            m_bedrooms = st.number_input("חדרי שינה:", value=3, min_value=0)
-            m_bathrooms = st.number_input("חדרי רחצה:", value=2, min_value=0)
+            m_region = st.text_input("אזור/אי:", value=ext.get("region", "כרתים"))
+            m_city = st.text_input("עיר/מחוז:", value=ext.get("city_town", "חאניה"))
+            m_village = st.text_input("כפר/שכונה:", value=ext.get("village", "קליבס"))
+            m_bedrooms = st.number_input("חדרי שינה:", value=int(ext.get("bedrooms", 3) or 3), min_value=0)
+            m_bathrooms = st.number_input("חדרי רחצה:", value=int(ext.get("bathrooms", 2) or 2), min_value=0)
         with mc3:
-            m_has_pool = st.checkbox("🏊‍♂️ בריכה פרטית", value=True)
-            m_sea_view = st.checkbox("🌊 נוף לים", value=True)
-            m_phys = st.slider("ציון מצב פיזי (1-10):", 1.0, 10.0, 8.0, 0.5)
-            m_loc = st.slider("ציון מיקום (1-10):", 1.0, 10.0, 8.0, 0.5)
-            m_airbnb = st.slider("ציון פוטנציאל Airbnb (1-10):", 1.0, 10.0, 8.0, 0.5)
+            m_has_pool = st.checkbox("🏊‍♂️ בריכה פרטית", value=bool(ext.get("has_pool", True)))
+            m_sea_view = st.checkbox("🌊 נוף לים", value=bool(ext.get("sea_view", True)))
+            m_phys = st.slider("ציון מצב פיזי (1-10):", 1.0, 10.0, float(ext.get("physical_score", 8.0) or 8.0), 0.5)
+            m_loc = st.slider("ציון מיקום (1-10):", 1.0, 10.0, float(ext.get("location_score", 8.0) or 8.0), 0.5)
+            m_airbnb = st.slider("ציון פוטנציאל Airbnb (1-10):", 1.0, 10.0, float(ext.get("airbnb_score", 8.0) or 8.0), 0.5)
 
-        m_summary = st.text_area("תקציר/הערות נוספות:", value="נכס שמור מהזנה ידנית.")
+        m_summary = st.text_area("תקציר/הערות נוספות (בעברית):", value=ext.get("summary", "נכס שמור מהזנה ידנית."))
         submit_manual = st.form_submit_button("💾 שמור נכס בלוח המשפחתי")
 
         if submit_manual:
@@ -349,7 +364,7 @@ if st.session_state.get("show_manual_add", False):
                 "airbnb_score": m_airbnb,
                 "summary": m_summary,
                 "added_by": added_by,
-                "url": property_url.strip() if property_url and property_url.strip() != "" else "N/A"
+                "url": m_url.strip() if m_url and m_url.strip() != "" else "N/A"
             }
             
             current_props = load_data()
@@ -359,7 +374,9 @@ if st.session_state.get("show_manual_add", False):
             
             st.session_state.properties = current_props
             st.session_state["show_manual_add"] = False
-            st.success("הנכס נשמר בהצלחה!")
+            if "m_extracted" in st.session_state:
+                del st.session_state["m_extracted"]
+            st.success("הנכס נשמר בהצלחה בלוח!")
             st.rerun()
 
 st.divider()

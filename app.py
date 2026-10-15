@@ -189,7 +189,7 @@ def parse_text_locally(text, url=""):
     if not combined:
         return data
 
-    # 1. זיהוי כפר ספציפי באפוקורונס (לפי סדר חשיבות)
+    # 1. זיהוי כפר ספציפי
     village_map = {
         "kokkino chorio": "קוקינו חוריו",
         "kokkino": "קוקינו חוריו",
@@ -212,7 +212,7 @@ def parse_text_locally(text, url=""):
             data["property_title"] = f"בית/וילה ב{he_v}"
             break
 
-    # 2. חילוץ מחיר מדויק (מחפש סכום עם סמל אירו או מילת euro)
+    # 2. חילוץ מחיר מדויק
     price_match = re.search(r'(?:€|EUR|\$)\s*([\d,]+)|([\d,]+)\s*(?:€|EUR|euros)', combined, re.IGNORECASE)
     if price_match:
         val = price_match.group(1) or price_match.group(2)
@@ -223,7 +223,7 @@ def parse_text_locally(text, url=""):
         except:
             pass
 
-    # 3. חילוץ חדרי שינה (מדויק עבור 2-bedroom, 3 bed, 3-bed וכדומה)
+    # 3. חילוץ חדרי שינה
     bed_match = re.search(r'(\d+)\s*(?:-|\s)*(?:bed|bedroom|bedrooms|חדרי שינה|חדרים)', combined, re.IGNORECASE)
     if bed_match:
         try:
@@ -231,7 +231,7 @@ def parse_text_locally(text, url=""):
         except:
             pass
 
-    # 4. חילוץ חדרי רחצה (מדויק עבור 2-bathroom, 2 bath וכדומה)
+    # 4. חילוץ חדרי רחצה
     bath_match = re.search(r'(\d+)\s*(?:-|\s)*(?:bath|bathroom|bathrooms|חדרי רחצה)', combined, re.IGNORECASE)
     if bath_match:
         try:
@@ -239,7 +239,7 @@ def parse_text_locally(text, url=""):
         except:
             pass
 
-    # 5. חילוץ שטח בנוי (sqm / m2 / מ"ר)
+    # 5. חילוץ שטח בנוי בלבד
     built_match = re.search(r'(\d+)\s*(?:sqm|sq\.m|m2|מ"ר|מטר בנוי)', combined, re.IGNORECASE)
     if built_match:
         try:
@@ -247,14 +247,16 @@ def parse_text_locally(text, url=""):
         except:
             pass
 
-    # 6. חילוץ שטח מגרש (plot)
-    plot_match = re.search(r'plot\s*(?:of)?\s*(\d+)|(\d+)\s*(?:sqm|m2)\s*plot', combined, re.IGNORECASE)
+    # 6. חילוץ שטח מגרש (רק אם מופיעה מילת Plot מפורשת)
+    plot_match = re.search(r'(?:plot|land|garden|lot)\s*(?:of)?\s*(\d+)|(\d+)\s*(?:sqm|m2)\s*(?:plot|land|garden|lot)', combined, re.IGNORECASE)
     if plot_match:
         try:
             val = plot_match.group(1) or plot_match.group(2)
             data["plot_sqm"] = int(val)
         except:
             pass
+    else:
+        data["plot_sqm"] = 0 # לא משבטים את השטח הבנוי אם אין אזכור מגרש מפורש!
 
     # 7. חילוץ בריכה ונוף לים
     if re.search(r'pool|בריכה|swimming', combined, re.IGNORECASE):
@@ -400,7 +402,6 @@ with st.expander("➕ הוספת נכס חדש (אוטומטי או ידני)", 
                     st.success(f"הנכס '{parsed_data.get('property_title', 'נכס חדש')}' נשמר בהצלחה באופן קבוע!")
                     st.rerun()
                 else:
-                    # חילוץ מקומי מדויק מידי כשאין מכסת AI
                     st.session_state["m_extracted"] = parse_text_locally(property_text, property_url)
                     st.session_state["show_manual_add"] = True
                     st.warning("⚠️ המכסה החינמית ב-API בשיא. הטופס הידני למטה נפתח עם הנתונים המדויקים שחולצו מהטקסט!")

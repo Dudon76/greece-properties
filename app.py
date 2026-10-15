@@ -247,7 +247,7 @@ def parse_text_locally(text, url=""):
         except:
             pass
 
-    # 6. חילוץ שטח מגרש (רק אם מופיעה מילת Plot מפורשת)
+    # 6. חילוץ שטח מגרש (רק אם מופיעה מילת Plot/Land/Garden מפורשת)
     plot_match = re.search(r'(?:plot|land|garden|lot)\s*(?:of)?\s*(\d+)|(\d+)\s*(?:sqm|m2)\s*(?:plot|land|garden|lot)', combined, re.IGNORECASE)
     if plot_match:
         try:
@@ -256,7 +256,7 @@ def parse_text_locally(text, url=""):
         except:
             pass
     else:
-        data["plot_sqm"] = 0 # לא משבטים את השטח הבנוי אם אין אזכור מגרש מפורש!
+        data["plot_sqm"] = 0  # שטח מגרש יישאר 0 באופן חצי-אוטומטי אם אין אזכור מגרש מפורש!
 
     # 7. חילוץ בריכה ונוף לים
     if re.search(r'pool|בריכה|swimming', combined, re.IGNORECASE):
@@ -383,6 +383,10 @@ with st.expander("➕ הוספת נכס חדש (אוטומטי או ידני)", 
         btn_manual_toggle = st.button("✏️ פתח טופס הזנה/עריכה ידנית", use_container_width=True)
 
     if btn_auto:
+        # ניקוי זיכרון זמני ישן לפני ניתוח חדש
+        if "m_extracted" in st.session_state:
+            del st.session_state["m_extracted"]
+
         if not property_text and not uploaded_images and not property_url:
             st.error("יש לספק לפחות צילום מסך אחד, טקסט או קישור למודעה.")
         else:
@@ -402,6 +406,7 @@ with st.expander("➕ הוספת נכס חדש (אוטומטי או ידני)", 
                     st.success(f"הנכס '{parsed_data.get('property_title', 'נכס חדש')}' נשמר בהצלחה באופן קבוע!")
                     st.rerun()
                 else:
+                    # חילוץ מקומי מדויק ועדכון הזיכרון הזמני בלבד
                     st.session_state["m_extracted"] = parse_text_locally(property_text, property_url)
                     st.session_state["show_manual_add"] = True
                     st.warning("⚠️ המכסה החינמית ב-API בשיא. הטופס הידני למטה נפתח עם הנתונים המדויקים שחולצו מהטקסט!")
@@ -427,7 +432,9 @@ if st.session_state.get("show_manual_add", False):
                 st.success("הנתונים חולצו בהצלחה באמצעות AI!")
             st.session_state["m_extracted"] = extracted
 
-    ext = st.session_state.get("m_extracted", parse_text_locally(property_text, property_url))
+    ext = st.session_state.get("m_extracted")
+    if not ext:
+        ext = parse_text_locally(property_text, property_url)
 
     with st.form(key="manual_add_form"):
         mc1, mc2, mc3 = st.columns(3)

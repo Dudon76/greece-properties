@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import base64
 import requests
 import streamlit as st
@@ -25,7 +26,7 @@ GITHUB_REPO = st.secrets.get("GITHUB_REPO", "") # למשל: Dudon76/greece-prope
 FILE_PATH = "properties_data.json"
 
 # ==========================================
-# מנגנון שמירה קבוע ב-GitHub (אמינות 100%)
+# מנגנון שמירה שטוען ושומר תמיד מול GitHub
 # ==========================================
 def get_github_headers():
     return {
@@ -39,45 +40,49 @@ def load_data():
             st.session_state.local_db = []
         return st.session_state.local_db
 
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{FILE_PATH}"
-    res = requests.get(url, headers=get_github_headers())
-    if res.status_code == 200:
-        content = res.json()
-        file_data = base64.b64decode(content["content"]).decode("utf-8")
-        st.session_state["file_sha"] = content["sha"]
-        return json.loads(file_data)
-    else:
-        return []
+    try:
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{FILE_PATH}"
+        res = requests.get(url, headers=get_github_headers(), timeout=10)
+        if res.status_code == 200:
+            content = res.json()
+            file_data = base64.b64decode(content["content"]).decode("utf-8")
+            st.session_state["file_sha"] = content["sha"]
+            parsed_json = json.loads(file_data)
+            return parsed_json if isinstance(parsed_json, list) else []
+        else:
+            return st.session_state.get("local_db", [])
+    except Exception as e:
+        return st.session_state.get("local_db", [])
 
 def save_data(data_list):
     st.session_state.local_db = data_list
     if not GITHUB_TOKEN or not GITHUB_REPO:
         return
 
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{FILE_PATH}"
-    json_bytes = json.dumps(data_list, ensure_ascii=False, indent=2).encode("utf-8")
-    base64_content = base64.b64encode(json_bytes).decode("utf-8")
+    try:
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{FILE_PATH}"
+        json_bytes = json.dumps(data_list, ensure_ascii=False, indent=2).encode("utf-8")
+        base64_content = base64.b64encode(json_bytes).decode("utf-8")
 
-    payload = {
-        "message": "Update properties database",
-        "content": base64_content
-    }
-    if "file_sha" in st.session_state:
-        payload["sha"] = st.session_state["file_sha"]
+        payload = {
+            "message": "Update properties database",
+            "content": base64_content
+        }
+        if "file_sha" in st.session_state:
+            payload["sha"] = st.session_state["file_sha"]
 
-    res = requests.put(url, json=payload, headers=get_github_headers())
-    if res.status_code in [200, 201]:
-        st.session_state["file_sha"] = res.json()["content"]["sha"]
-    else:
-        st.error(f"שגיאה בשמירה ל-GitHub: {res.json().get('message')}")
+        res = requests.put(url, json=payload, headers=get_github_headers(), timeout=10)
+        if res.status_code in [200, 201]:
+            st.session_state["file_sha"] = res.json()["content"]["sha"]
+    except Exception as e:
+        st.error(f"שגיאה בשמירה ל-GitHub: {e}")
 
 # ==========================================
-# פונקציית בדיקת התאמה לקריטריוני התיעדוף החדשים
+# פונקציית בדיקת התאמה לקריטריוני התיעדוף
 # ==========================================
 def evaluate_ideal_criteria(prop):
     reasons = []
 
-    # 1. מיקום - אפוקורונס
     loc_text = f"{prop.get('region', '')} {prop.get('city_town', '')} {prop.get('village', '')} {prop.get('summary', '')} {prop.get('property_title', '')}".lower()
     
     apokoronas_villages = [
@@ -94,27 +99,22 @@ def evaluate_ideal_criteria(prop):
     if not is_apokoronas:
         reasons.append("מחוץ לאזור אפוקורונס")
 
-    # 2. גודל הבית - 3 חדרי שינה מינימום
     bedrooms = int(prop.get("bedrooms", 0) or 0)
     if bedrooms < 3:
         reasons.append(f"פחות מ-3 חדרי שינה ({bedrooms} חדרים)")
 
-    # 3. שטח בנוי - 80 מ"ר מינימום (אם חסר במודעה אך יש 3+ חדרים -> מאושר!)
     built_sqm = float(prop.get("built_sqm", 0) or 0)
     if 0 < built_sqm < 80:
         reasons.append(f"שטח בנוי מתחת ל-80 מ\"ר ({built_sqm} מ\"ר)")
 
-    # 4. מצב הנכס - מוכן לכניסה (ציון פיזי >= 7.0)
     physical_score = float(prop.get("physical_score", 5.0) or 5.0)
     if physical_score < 7.0:
         reasons.append("דורש שיפוץ/שדרוג")
 
-    # 5. חצר/מגרש של מינ' 200 מ"ר (אם הנתון חסר במודעה -> מאושר!)
     plot_sqm = float(prop.get("plot_sqm", 0) or 0)
     if 0 < plot_sqm < 200:
         reasons.append(f"חצר קטנה מ-200 מ\"ר ({plot_sqm} מ\"ר)")
 
-    # 6. בדיקת חובת לפחות אחד מהשניים: בריכה או נוף לים
     has_pool = bool(prop.get("has_pool", False))
     sea_view = bool(prop.get("sea_view", False))
     if not has_pool and not sea_view:
@@ -161,11 +161,8 @@ def calculate_financials(prop):
         "net_roi": round(net_roi, 2)
     }
 
-if "properties" not in st.session_state:
-    st.session_state.properties = load_data()
-
 # ==========================================
-# 2. מנוע AI לחילוץ נתונים מ-Gemini
+# 2. מנוע AI מעודכן עם gemini-2.5-flash
 # ==========================================
 SYSTEM_INSTRUCTION = """
 אתה מומחה נדל"ן ומעריך נכסים ביוון. תפקידך לחלץ מודעת נדל"ן (מטקסט, קישור או תמונות/צילומי מסך מרובים) ולהחזיר אך ורק אובייקט JSON תקני ללא שום דיבורים נוספים.
@@ -195,9 +192,10 @@ SYSTEM_INSTRUCTION = """
 total_score = (0.4 * physical_score) + (0.3 * location_score) + (0.3 * airbnb_score)
 """
 
-def analyze_with_gemini(user_text=None, image_files=None):
+def analyze_with_gemini(user_text=None, image_files=None, retries=3):
+    # שימוש במודל הרשמי והעדכני gemini-2.5-flash
     model = genai.GenerativeModel(
-        model_name="gemini-3.8-flash",
+        model_name="gemini-2.5-flash",
         system_instruction=SYSTEM_INSTRUCTION,
         generation_config={"response_mime_type": "application/json"}
     )
@@ -211,22 +209,30 @@ def analyze_with_gemini(user_text=None, image_files=None):
     if user_text:
         contents.append(user_text)
         
-    response = model.generate_content(contents)
-    
-    raw_text = response.text.strip()
-    if raw_text.startswith("```json"):
-        raw_text = raw_text[7:]
-    if raw_text.endswith("```"):
-        raw_text = raw_text[:-3]
-    raw_text = raw_text.strip()
-    
-    return json.loads(raw_text)
+    for attempt in range(retries):
+        try:
+            response = model.generate_content(contents)
+            raw_text = response.text.strip()
+            if raw_text.startswith("```json"):
+                raw_text = raw_text[7:]
+            if raw_text.endswith("```"):
+                raw_text = raw_text[:-3]
+            raw_text = raw_text.strip()
+            return json.loads(raw_text)
+        except Exception as e:
+            if "429" in str(e) and attempt < retries - 1:
+                time.sleep(8)
+            else:
+                raise e
 
 # ==========================================
-# 3. ממשק המשתמש (UI)
+# 3. ממשק המשתמש (UI) והטענת נתונים בטוחה
 # ==========================================
 st.title("🏠 מנוע השוואת נכסים ביוון - לוח משפחתי")
 st.caption("הוסיפו צילומי מסך או טקסט של מודעה, וה-AI יחלץ את הנתונים, ידרג אותה ויחשב את התשואה והעלויות הנילוות.")
+
+# טעינת כל הנכסים השמורים
+st.session_state.properties = load_data()
 
 with st.expander("🎯 קריטריוני הנכס האידאלי לרשימת המיקוד (לחץ לצפייה)", expanded=False):
     st.markdown("""
@@ -289,8 +295,6 @@ st.divider()
 # ==========================================
 # 4. הצגת טבלת ההשוואה, עריכה ומחיקה
 # ==========================================
-st.session_state.properties = load_data()
-
 if not st.session_state.properties:
     st.info("עדיין לא הוספו נכסים. השתמשו בטופס למעלה כדי להוסיף את הנכס הראשון!")
 else:
@@ -302,7 +306,6 @@ else:
         loc = float(p.get("location_score", 5.0) or 5.0)
         airbnb = float(p.get("airbnb_score", 5.0) or 5.0)
         
-        # תוספות ניקוד (+1.0) עבור בריכה ונוף לים
         if bool(p.get("has_pool", False)):
             phys = min(10.0, phys + 1.0)
             airbnb = min(10.0, airbnb + 1.0)

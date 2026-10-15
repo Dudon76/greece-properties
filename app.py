@@ -180,37 +180,41 @@ def parse_text_locally(text, url=""):
         "bathrooms": 2,
         "has_pool": False,
         "sea_view": False,
-        "physical_score": 8.0,
-        "location_score": 8.0,
-        "airbnb_score": 8.0,
+        "physical_score": 7.5,
+        "location_score": 7.5,
+        "airbnb_score": 7.5,
         "summary": text[:300] if text else "נכס מהזנה ידנית"
     }
     
     if not combined:
         return data
 
-    # 1. זיהוי כפר ספציפי
-    village_map = {
-        "kokkino chorio": "קוקינו חוריו",
-        "kokkino": "קוקינו חוריו",
-        "kefalas": "קפלאס",
-        "plaka": "פלאקה",
-        "almyrida": "אלמירידה",
-        "vamos": "ואמוס",
-        "gavalochori": "גובאלוכורי",
-        "kalyves": "קליבס",
-        "georgioupoli": "גאורגיופוליס",
-        "kavros": "קאברוס",
-        "drapanos": "דראפנוס",
-        "kournas": "קורנאס",
-        "vryses": "וריסס"
+    # 1. זיהוי כפר ספציפי וציון מיקום דינמי
+    village_scores = {
+        "kokkino chorio": ("קוקינו חוריו", 9.0),
+        "kokkino": ("קוקינו חוריו", 9.0),
+        "plaka": ("פלאקה", 9.0),
+        "almyrida": ("אלמירידה", 9.0),
+        "kefalas": ("קפלאס", 8.5),
+        "vamos": ("ואמוס", 8.5),
+        "gavalochori": ("גובאלוכורי", 8.5),
+        "kalyves": ("קליבס", 8.5),
+        "georgioupoli": ("גאורגיופוליס", 8.0),
+        "drapanos": ("דראפנוס", 8.0)
     }
     
-    for en_v, he_v in village_map.items():
+    found_village = False
+    for en_v, (he_v, loc_score) in village_scores.items():
         if en_v in combined.lower():
             data["village"] = he_v
             data["property_title"] = f"בית/וילה ב{he_v}"
+            data["location_score"] = loc_score
+            found_village = True
             break
+            
+    if not found_village:
+        data["village"] = "אפוקורונס"
+        data["location_score"] = 7.5
 
     # 2. חילוץ מחיר מדויק
     price_match = re.search(r'(?:€|EUR|\$)\s*([\d,]+)|([\d,]+)\s*(?:€|EUR|euros)', combined, re.IGNORECASE)
@@ -256,13 +260,29 @@ def parse_text_locally(text, url=""):
         except:
             pass
     else:
-        data["plot_sqm"] = 0  # שטח מגרש יישאר 0 באופן חצי-אוטומטי אם אין אזכור מגרש מפורש!
+        data["plot_sqm"] = 0  # נשאר 0 להזנה ידנית אם אין אזכור מגרש מפורש!
 
     # 7. חילוץ בריכה ונוף לים
     if re.search(r'pool|בריכה|swimming', combined, re.IGNORECASE):
         data["has_pool"] = True
     if re.search(r'sea\s*view|sea\s*views|נוף\s*לים|panoramic\s*view', combined, re.IGNORECASE):
         data["sea_view"] = True
+
+    # 8. חישוב ציונים פיזי ו-Airbnb דינמיים לפי פרמטרים
+    phys_score = 7.0
+    airbnb_score = 7.0
+
+    if data["has_pool"]:
+        phys_score += 1.0
+        airbnb_score += 1.0
+    if data["sea_view"]:
+        phys_score += 1.0
+        airbnb_score += 1.0
+    if data["bathrooms"] >= 2:
+        phys_score += 0.5
+
+    data["physical_score"] = min(10.0, phys_score)
+    data["airbnb_score"] = min(10.0, airbnb_score)
 
     return data
 
@@ -383,9 +403,7 @@ with st.expander("➕ הוספת נכס חדש (אוטומטי או ידני)", 
         btn_manual_toggle = st.button("✏️ פתח טופס הזנה/עריכה ידנית", use_container_width=True)
 
     if btn_auto:
-        # ניקוי זיכרון זמני ישן לפני ניתוח חדש
-        if "m_extracted" in st.session_state:
-            del st.session_state["m_extracted"]
+        st.session_state["m_extracted"] = None
 
         if not property_text and not uploaded_images and not property_url:
             st.error("יש לספק לפחות צילום מסך אחד, טקסט או קישור למודעה.")
@@ -406,7 +424,6 @@ with st.expander("➕ הוספת נכס חדש (אוטומטי או ידני)", 
                     st.success(f"הנכס '{parsed_data.get('property_title', 'נכס חדש')}' נשמר בהצלחה באופן קבוע!")
                     st.rerun()
                 else:
-                    # חילוץ מקומי מדויק ועדכון הזיכרון הזמני בלבד
                     st.session_state["m_extracted"] = parse_text_locally(property_text, property_url)
                     st.session_state["show_manual_add"] = True
                     st.warning("⚠️ המכסה החינמית ב-API בשיא. הטופס הידני למטה נפתח עם הנתונים המדויקים שחולצו מהטקסט!")
@@ -453,9 +470,9 @@ if st.session_state.get("show_manual_add", False):
         with mc3:
             m_has_pool = st.checkbox("🏊‍♂️ בריכה פרטית", value=bool(ext.get("has_pool", False)))
             m_sea_view = st.checkbox("🌊 נוף לים", value=bool(ext.get("sea_view", True)))
-            m_phys = st.slider("ציון מצב פיזי (1-10):", 1.0, 10.0, float(ext.get("physical_score", 8.0) or 8.0), 0.5)
-            m_loc = st.slider("ציון מיקום (1-10):", 1.0, 10.0, float(ext.get("location_score", 8.0) or 8.0), 0.5)
-            m_airbnb = st.slider("ציון פוטנציאל Airbnb (1-10):", 1.0, 10.0, float(ext.get("airbnb_score", 8.0) or 8.0), 0.5)
+            m_phys = st.slider("ציון מצב פיזי (1-10):", 1.0, 10.0, float(ext.get("physical_score", 8.5) or 8.5), 0.5)
+            m_loc = st.slider("ציון מיקום (1-10):", 1.0, 10.0, float(ext.get("location_score", 9.0) or 9.0), 0.5)
+            m_airbnb = st.slider("ציון פוטנציאל Airbnb (1-10):", 1.0, 10.0, float(ext.get("airbnb_score", 9.0) or 9.0), 0.5)
 
         m_summary = st.text_area("תקציר/הערות נוספות:", value=ext.get("summary", property_text[:300] if property_text else "נכס שמור מהזנה ידנית."))
         submit_manual = st.form_submit_button("💾 שמור נכס בלוח המשפחתי")
@@ -651,7 +668,7 @@ else:
 
     st.divider()
 
-    # --- הצגת נכסים בעדיפות משנית ---
+    # --- הצגת נכסים בעלי עניין ---
     st.markdown("## ⚠️ נכסים בעלי עניין (עדיפות משנית / חוסר התאמה לקריטריון)")
     if df_secondary.empty:
         st.info("כל הנכסים בלוח עונים על קריטריוני המיקוד!")

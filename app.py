@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import time
 import base64
@@ -22,11 +23,11 @@ if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
 GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
-GITHUB_REPO = st.secrets.get("GITHUB_REPO", "") # למשל: Dudon76/greece-properties
+GITHUB_REPO = st.secrets.get("GITHUB_REPO", "")
 FILE_PATH = "properties_data.json"
 
 # ==========================================
-# מנגנון שמירה שטוען ושומר תמיד מול GitHub
+# מנגנון שמירה מול GitHub
 # ==========================================
 def get_github_headers():
     return {
@@ -162,6 +163,60 @@ def calculate_financials(prop):
     }
 
 # ==========================================
+# פונקציית חילוץ מקומית ב-Python (ללא AI/מכסות)
+# ==========================================
+def parse_text_locally(text):
+    data = {
+        "property_title": "וילה באפוקורונס",
+        "region": "כרתים",
+        "city_town": "חאניה",
+        "village": "אפוקורונס",
+        "price_eur": 250000,
+        "built_sqm": 100,
+        "plot_sqm": 300,
+        "bedrooms": 3,
+        "bathrooms": 2,
+        "has_pool": False,
+        "sea_view": False,
+        "summary": text[:250] if text else "נכס מהזנה ידנית"
+    }
+    if not text:
+        return data
+
+    # 1. חילוץ מחיר
+    price_match = re.search(r'(?:€|EUR|\$)\s*([\d,]+)|([\d,]+)\s*(?:€|EUR|euros)', text, re.IGNORECASE)
+    if price_match:
+        val = price_match.group(1) or price_match.group(2)
+        try:
+            data["price_eur"] = int(val.replace(',', ''))
+        except:
+            pass
+
+    # 2. חילוץ שטח בנוי
+    built_match = re.search(r'([\d\.]+)\s*(?:sqm|sq\.m|m2|מ"ר|מטר)', text, re.IGNORECASE)
+    if built_match:
+        try:
+            data["built_sqm"] = int(float(built_match.group(1)))
+        except:
+            pass
+
+    # 3. חילוץ חדרי שינה
+    bed_match = re.search(r'(\d+)\s*(?:bed|bedroom|bedrooms|חדרי שינה|חדרים)', text, re.IGNORECASE)
+    if bed_match:
+        try:
+            data["bedrooms"] = int(bed_match.group(1))
+        except:
+            pass
+
+    # 4. חילוץ בריכה ונוף לים
+    if re.search(r'pool|בריכה|swimming', text, re.IGNORECASE):
+        data["has_pool"] = True
+    if re.search(r'sea\s*view|נוף\s*לים|ocean\s*view', text, re.IGNORECASE):
+        data["sea_view"] = True
+
+    return data
+
+# ==========================================
 # 2. מנוע AI עם מנגנון Fallback מרובה מודלים
 # ==========================================
 SYSTEM_INSTRUCTION = """
@@ -275,7 +330,7 @@ with st.expander("➕ הוספת נכס חדש (אוטומטי או ידני)", 
     with col_btn1:
         btn_auto = st.button("🚀 נתח והוסף אוטומטית ללוח", use_container_width=True)
     with col_btn2:
-        btn_manual_toggle = st.button("✏️ פתח טופס הזנה/עריכה ידנית (כולל חילוץ אוטומטי לשדות)", use_container_width=True)
+        btn_manual_toggle = st.button("✏️ פתח טופס הזנה/עריכה ידנית", use_container_width=True)
 
     if btn_auto:
         if not property_text and not uploaded_images and not property_url:
@@ -298,27 +353,28 @@ with st.expander("➕ הוספת נכס חדש (אוטומטי או ידני)", 
                     st.rerun()
                 else:
                     st.session_state["show_manual_add"] = True
-                    st.warning("⚠️ המכסה החינמית ב-API של Gemini בשיא. הטופס הידני למטה נפתח עם השדות המיועדים!")
+                    st.warning("⚠️ המכסה החינמית ב-API של Gemini בשיא. הטופס הידני למטה נפתח עם הפרטים שהזנת!")
 
     if btn_manual_toggle:
         st.session_state["show_manual_add"] = True
 
 # ==========================================
-# 3.1 טופס הזנה ידנית חכם (מחלץ שדות אוטומטית)
+# 3.1 טופס הזנה ידנית חכם וחסין שגיאות
 # ==========================================
 if st.session_state.get("show_manual_add", False):
     st.divider()
     st.info("📝 **טופס הזנת נכס ידנית / חצי-אוטומטית:**")
-    st.caption("תוכל ללחוץ על '🪄 חלץ ומלא שדות מהטקסט/תמונות' כדי שה-AI יאכלס את שדות הטופס מראש, או למלא את הפרטים בעצמך.")
     
-    if st.button("🪄 חלץ ומלא שדות אוטומטית מהטקסט/התמונות למעלה"):
+    if st.button("🪄 חלץ ומלא שדות מהטקסט/התמונות למעלה"):
         with st.spinner("מחלץ נתונים לשדות הטופס..."):
             extracted = analyze_with_gemini_with_fallback(user_text=property_text, image_files=uploaded_images)
-            if extracted:
-                st.session_state["m_extracted"] = extracted
-                st.success("הנתונים חולצו בהצלחה לשדות הטופס!")
+            if not extracted:
+                # Fallback מקומי ב-Python כשאין מכסת AI
+                extracted = parse_text_locally(property_text)
+                st.warning("⚠️ ה-API של Gemini בעומס. השדות אוכלסו באמצעות חילוץ הטקסט המקומי!")
             else:
-                st.error("לא ניתן היה לחלץ נתונים אוטומטית בשל עומס API. אנא הזן את הנתונים ידנית בשדות.")
+                st.success("הנתונים חולצו בהצלחה באמצעות AI!")
+            st.session_state["m_extracted"] = extracted
 
     ext = st.session_state.get("m_extracted", {})
 
@@ -343,7 +399,7 @@ if st.session_state.get("show_manual_add", False):
             m_loc = st.slider("ציון מיקום (1-10):", 1.0, 10.0, float(ext.get("location_score", 8.0) or 8.0), 0.5)
             m_airbnb = st.slider("ציון פוטנציאל Airbnb (1-10):", 1.0, 10.0, float(ext.get("airbnb_score", 8.0) or 8.0), 0.5)
 
-        m_summary = st.text_area("תקציר/הערות נוספות (בעברית):", value=ext.get("summary", "נכס שמור מהזנה ידנית."))
+        m_summary = st.text_area("תקציר/הערות נוספות (בעברית):", value=ext.get("summary", property_text[:300] if property_text else "נכס שמור מהזנה ידנית."))
         submit_manual = st.form_submit_button("💾 שמור נכס בלוח המשפחתי")
 
         if submit_manual:

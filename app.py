@@ -162,7 +162,7 @@ def calculate_financials(prop):
     }
 
 # ==========================================
-# 2. מנוע AI מעודכן עם gemini-2.5-flash
+# 2. מנוע AI עם מנגנון Fallback מרובה מודלים
 # ==========================================
 SYSTEM_INSTRUCTION = """
 אתה מומחה נדל"ן ומעריך נכסים ביוון. תפקידך לחלץ מודעת נדל"ן (מטקסט, קישור או תמונות/צילומי מסך מרובים) ולהחזיר אך ורק אובייקט JSON תקני ללא שום דיבורים נוספים.
@@ -192,13 +192,14 @@ SYSTEM_INSTRUCTION = """
 total_score = (0.4 * physical_score) + (0.3 * location_score) + (0.3 * airbnb_score)
 """
 
-def analyze_with_gemini(user_text=None, image_files=None, retries=3):
-    # שימוש במודל הרשמי והעדכני gemini-3.8-flash
-    model = genai.GenerativeModel(
-        model_name="gemini-3.8-flash",
-        system_instruction=SYSTEM_INSTRUCTION,
-        generation_config={"response_mime_type": "application/json"}
-    )
+def analyze_with_gemini_with_fallback(user_text=None, image_files=None):
+    # רשימת מודלים לנסות לפי סדר עדיפויות
+    models_to_try = [
+        "gemini-3.8-flash",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+        "gemini-2.0-flash"
+    ]
     
     contents = []
     if image_files:
@@ -209,8 +210,14 @@ def analyze_with_gemini(user_text=None, image_files=None, retries=3):
     if user_text:
         contents.append(user_text)
         
-    for attempt in range(retries):
+    last_error = None
+    for model_name in models_to_try:
         try:
+            model = genai.GenerativeModel(
+                model_name=model_name,
+                system_instruction=SYSTEM_INSTRUCTION,
+                generation_config={"response_mime_type": "application/json"}
+            )
             response = model.generate_content(contents)
             raw_text = response.text.strip()
             if raw_text.startswith("```json"):
@@ -220,18 +227,23 @@ def analyze_with_gemini(user_text=None, image_files=None, retries=3):
             raw_text = raw_text.strip()
             return json.loads(raw_text)
         except Exception as e:
-            if "429" in str(e) and attempt < retries - 1:
-                time.sleep(8)
+            last_error = e
+            # אם שגיאת 429 / Quota, עוברים מיידית למודל הבא ברשימה
+            if "429" in str(e) or "quota" in str(e).lower():
+                continue
             else:
-                raise e
+                # אם שגיאה אחרת, ניתן לנסות גם מודל חלופי
+                continue
+
+    # אם כל המודלים נכשלו במכסה, מחזירים None כדי להפעיל טופס ידני
+    return None
 
 # ==========================================
-# 3. ממשק המשתמש (UI) והטענת נתונים בטוחה
+# 3. ממשק המשתמש (UI) והטענת נתונים
 # ==========================================
 st.title("🏠 מנוע השוואת נכסים ביוון - לוח משפחתי")
 st.caption("הוסיפו צילומי מסך או טקסט של מודעה, וה-AI יחלץ את הנתונים, ידרג אותה ויחשב את התשואה והעלויות הנילוות.")
 
-# טעינת כל הנכסים השמורים
 st.session_state.properties = load_data()
 
 with st.expander("🎯 קריטריוני הנכס האידאלי לרשימת המיקוד (לחץ לצפייה)", expanded=False):
@@ -273,9 +285,9 @@ with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=
             st.error("יש לספק לפחות צילום מסך אחד, טקסט או קישור למודעה.")
         else:
             with st.spinner("מנוע ה-AI מנתח את הנתונים ושומר באופן קבוע..."):
-                try:
-                    parsed_data = analyze_with_gemini(user_text=property_text, image_files=uploaded_images)
-                    
+                parsed_data = analyze_with_gemini_with_fallback(user_text=property_text, image_files=uploaded_images)
+                
+                if parsed_data is not None:
                     current_props = load_data()
                     parsed_data["id"] = len(current_props) + 1 if current_props else 1
                     parsed_data["added_by"] = added_by
@@ -287,8 +299,68 @@ with st.expander("➕ הוספת נכס חדש (לחץ להרחבה)", expanded=
                     st.session_state.properties = current_props
                     st.success(f"הנכס '{parsed_data.get('property_title', 'נכס חדש')}' נשמר בהצלחה באופן קבוע!")
                     st.rerun()
-                except Exception as e:
-                    st.error(f"שגיאה בניתוח המודעה: {e}")
+                else:
+                    st.session_state["show_manual_add"] = True
+                    st.warning("⚠️ המכסה החינמית היומית ב-API של Gemini הגיעה למקסימום. ניתן להזין את הפרטים בטופס הידני למטה והנכס יישמר כרגיל!")
+
+# ==========================================
+# 3.1 טופס הזנה ידנית במידה וה-API במכסה
+# ==========================================
+if st.session_state.get("show_manual_add", False):
+    st.info("📝 **טופס הזנת נכס ידנית (מעקף מכסת API):**")
+    with st.form(key="manual_add_form"):
+        mc1, mc2, mc3 = st.columns(3)
+        with mc1:
+            m_title = st.text_input("כותרת/שם הנכס:", value="וילה באפוקורונס")
+            m_price = st.number_input("מחיר ב-€:", value=250000, step=5000)
+            m_built = st.number_input("שטח בנוי (מ\"ר):", value=100, step=5)
+            m_plot = st.number_input("שטח מגרש (מ\"ר):", value=300, step=10)
+        with mc2:
+            m_region = st.text_input("אזור/אי:", value="כרתים")
+            m_city = st.text_input("עיר/מחוז:", value="חאניה")
+            m_village = st.text_input("כפר/שכונה:", value="קליבס")
+            m_bedrooms = st.number_input("חדרי שינה:", value=3, min_value=0)
+            m_bathrooms = st.number_input("חדרי רחצה:", value=2, min_value=0)
+        with mc3:
+            m_has_pool = st.checkbox("🏊‍♂️ בריכה פרטית", value=True)
+            m_sea_view = st.checkbox("🌊 נוף לים", value=True)
+            m_phys = st.slider("ציון מצב פיזי (1-10):", 1.0, 10.0, 8.0, 0.5)
+            m_loc = st.slider("ציון מיקום (1-10):", 1.0, 10.0, 8.0, 0.5)
+            m_airbnb = st.slider("ציון פוטנציאל Airbnb (1-10):", 1.0, 10.0, 8.0, 0.5)
+
+        m_summary = st.text_area("תקציר/הערות נוספות:", value="נכס שמור מהזנה ידנית.")
+        submit_manual = st.form_submit_button("💾 שמור נכס בלוח המשפחתי")
+
+        if submit_manual:
+            manual_prop = {
+                "property_title": m_title,
+                "region": m_region,
+                "city_town": m_city,
+                "village": m_village,
+                "price_eur": m_price,
+                "built_sqm": m_built,
+                "plot_sqm": m_plot,
+                "bedrooms": m_bedrooms,
+                "bathrooms": m_bathrooms,
+                "has_pool": m_has_pool,
+                "sea_view": m_sea_view,
+                "physical_score": m_phys,
+                "location_score": m_loc,
+                "airbnb_score": m_airbnb,
+                "summary": m_summary,
+                "added_by": added_by,
+                "url": property_url.strip() if property_url and property_url.strip() != "" else "N/A"
+            }
+            
+            current_props = load_data()
+            manual_prop["id"] = len(current_props) + 1 if current_props else 1
+            current_props.append(manual_prop)
+            save_data(current_props)
+            
+            st.session_state.properties = current_props
+            st.session_state["show_manual_add"] = False
+            st.success("הנכס נשמר בהצלחה!")
+            st.rerun()
 
 st.divider()
 

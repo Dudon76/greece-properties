@@ -193,9 +193,9 @@ total_score = (0.4 * physical_score) + (0.3 * location_score) + (0.3 * airbnb_sc
 """
 
 def analyze_with_gemini(user_text=None, image_files=None, retries=3):
-    # שימוש במודל הרשמי והעדכני gemini-2.5-flash
+    # שימוש במודל הרשמי והעדכני gemini-3.8-flash
     model = genai.GenerativeModel(
-        model_name="gemini-2.5-flash",
+        model_name="gemini-3.8-flash",
         system_instruction=SYSTEM_INSTRUCTION,
         generation_config={"response_mime_type": "application/json"}
     )

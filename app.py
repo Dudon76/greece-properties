@@ -163,55 +163,103 @@ def calculate_financials(prop):
     }
 
 # ==========================================
-# פונקציית חילוץ מקומית ב-Python (ללא AI/מכסות)
+# פונקציית חילוץ מקומית חכמה ומדויקת ב-Python
 # ==========================================
-def parse_text_locally(text):
+def parse_text_locally(text, url=""):
+    combined = f"{text} {url}".strip()
+    
     data = {
-        "property_title": "וילה באפוקורונס",
+        "property_title": "נכס באפוקורונס",
         "region": "כרתים",
         "city_town": "חאניה",
         "village": "אפוקורונס",
         "price_eur": 250000,
-        "built_sqm": 100,
-        "plot_sqm": 300,
-        "bedrooms": 3,
+        "built_sqm": 0,
+        "plot_sqm": 0,
+        "bedrooms": 2,
         "bathrooms": 2,
         "has_pool": False,
         "sea_view": False,
-        "summary": text[:250] if text else "נכס מהזנה ידנית"
+        "physical_score": 8.0,
+        "location_score": 8.0,
+        "airbnb_score": 8.0,
+        "summary": text[:300] if text else "נכס מהזנה ידנית"
     }
-    if not text:
+    
+    if not combined:
         return data
 
-    # 1. חילוץ מחיר
-    price_match = re.search(r'(?:€|EUR|\$)\s*([\d,]+)|([\d,]+)\s*(?:€|EUR|euros)', text, re.IGNORECASE)
+    # 1. זיהוי כפר ספציפי באפוקורונס (לפי סדר חשיבות)
+    village_map = {
+        "kokkino chorio": "קוקינו חוריו",
+        "kokkino": "קוקינו חוריו",
+        "kefalas": "קפלאס",
+        "plaka": "פלאקה",
+        "almyrida": "אלמירידה",
+        "vamos": "ואמוס",
+        "gavalochori": "גובאלוכורי",
+        "kalyves": "קליבס",
+        "georgioupoli": "גאורגיופוליס",
+        "kavros": "קאברוס",
+        "drapanos": "דראפנוס",
+        "kournas": "קורנאס",
+        "vryses": "וריסס"
+    }
+    
+    for en_v, he_v in village_map.items():
+        if en_v in combined.lower():
+            data["village"] = he_v
+            data["property_title"] = f"בית/וילה ב{he_v}"
+            break
+
+    # 2. חילוץ מחיר מדויק (מחפש סכום עם סמל אירו או מילת euro)
+    price_match = re.search(r'(?:€|EUR|\$)\s*([\d,]+)|([\d,]+)\s*(?:€|EUR|euros)', combined, re.IGNORECASE)
     if price_match:
         val = price_match.group(1) or price_match.group(2)
         try:
-            data["price_eur"] = int(val.replace(',', ''))
+            parsed_price = int(val.replace(',', ''))
+            if parsed_price > 10000:
+                data["price_eur"] = parsed_price
         except:
             pass
 
-    # 2. חילוץ שטח בנוי
-    built_match = re.search(r'([\d\.]+)\s*(?:sqm|sq\.m|m2|מ"ר|מטר)', text, re.IGNORECASE)
-    if built_match:
-        try:
-            data["built_sqm"] = int(float(built_match.group(1)))
-        except:
-            pass
-
-    # 3. חילוץ חדרי שינה
-    bed_match = re.search(r'(\d+)\s*(?:bed|bedroom|bedrooms|חדרי שינה|חדרים)', text, re.IGNORECASE)
+    # 3. חילוץ חדרי שינה (מדויק עבור 2-bedroom, 3 bed, 3-bed וכדומה)
+    bed_match = re.search(r'(\d+)\s*(?:-|\s)*(?:bed|bedroom|bedrooms|חדרי שינה|חדרים)', combined, re.IGNORECASE)
     if bed_match:
         try:
             data["bedrooms"] = int(bed_match.group(1))
         except:
             pass
 
-    # 4. חילוץ בריכה ונוף לים
-    if re.search(r'pool|בריכה|swimming', text, re.IGNORECASE):
+    # 4. חילוץ חדרי רחצה (מדויק עבור 2-bathroom, 2 bath וכדומה)
+    bath_match = re.search(r'(\d+)\s*(?:-|\s)*(?:bath|bathroom|bathrooms|חדרי רחצה)', combined, re.IGNORECASE)
+    if bath_match:
+        try:
+            data["bathrooms"] = int(bath_match.group(1))
+        except:
+            pass
+
+    # 5. חילוץ שטח בנוי (sqm / m2 / מ"ר)
+    built_match = re.search(r'(\d+)\s*(?:sqm|sq\.m|m2|מ"ר|מטר בנוי)', combined, re.IGNORECASE)
+    if built_match:
+        try:
+            data["built_sqm"] = int(built_match.group(1))
+        except:
+            pass
+
+    # 6. חילוץ שטח מגרש (plot)
+    plot_match = re.search(r'plot\s*(?:of)?\s*(\d+)|(\d+)\s*(?:sqm|m2)\s*plot', combined, re.IGNORECASE)
+    if plot_match:
+        try:
+            val = plot_match.group(1) or plot_match.group(2)
+            data["plot_sqm"] = int(val)
+        except:
+            pass
+
+    # 7. חילוץ בריכה ונוף לים
+    if re.search(r'pool|בריכה|swimming', combined, re.IGNORECASE):
         data["has_pool"] = True
-    if re.search(r'sea\s*view|נוף\s*לים|ocean\s*view', text, re.IGNORECASE):
+    if re.search(r'sea\s*view|sea\s*views|נוף\s*לים|panoramic\s*view', combined, re.IGNORECASE):
         data["sea_view"] = True
 
     return data
@@ -352,14 +400,17 @@ with st.expander("➕ הוספת נכס חדש (אוטומטי או ידני)", 
                     st.success(f"הנכס '{parsed_data.get('property_title', 'נכס חדש')}' נשמר בהצלחה באופן קבוע!")
                     st.rerun()
                 else:
+                    # חילוץ מקומי מדויק מידי כשאין מכסת AI
+                    st.session_state["m_extracted"] = parse_text_locally(property_text, property_url)
                     st.session_state["show_manual_add"] = True
-                    st.warning("⚠️ המכסה החינמית ב-API של Gemini בשיא. הטופס הידני למטה נפתח עם הפרטים שהזנת!")
+                    st.warning("⚠️ המכסה החינמית ב-API בשיא. הטופס הידני למטה נפתח עם הנתונים המדויקים שחולצו מהטקסט!")
 
     if btn_manual_toggle:
+        st.session_state["m_extracted"] = parse_text_locally(property_text, property_url)
         st.session_state["show_manual_add"] = True
 
 # ==========================================
-# 3.1 טופס הזנה ידנית חכם וחסין שגיאות
+# 3.1 טופס הזנה ידנית חכם ומדויק
 # ==========================================
 if st.session_state.get("show_manual_add", False):
     st.divider()
@@ -369,37 +420,36 @@ if st.session_state.get("show_manual_add", False):
         with st.spinner("מחלץ נתונים לשדות הטופס..."):
             extracted = analyze_with_gemini_with_fallback(user_text=property_text, image_files=uploaded_images)
             if not extracted:
-                # Fallback מקומי ב-Python כשאין מכסת AI
-                extracted = parse_text_locally(property_text)
+                extracted = parse_text_locally(property_text, property_url)
                 st.warning("⚠️ ה-API של Gemini בעומס. השדות אוכלסו באמצעות חילוץ הטקסט המקומי!")
             else:
                 st.success("הנתונים חולצו בהצלחה באמצעות AI!")
             st.session_state["m_extracted"] = extracted
 
-    ext = st.session_state.get("m_extracted", {})
+    ext = st.session_state.get("m_extracted", parse_text_locally(property_text, property_url))
 
     with st.form(key="manual_add_form"):
         mc1, mc2, mc3 = st.columns(3)
         with mc1:
-            m_title = st.text_input("כותרת/שם הנכס:", value=ext.get("property_title", "וילה באפוקורונס"))
+            m_title = st.text_input("כותרת/שם הנכס:", value=ext.get("property_title", "נכס באפוקורונס"))
             m_url = st.text_input("🔗 קישור למודעה / פוסט:", value=property_url if property_url else ext.get("url", "N/A"))
             m_price = st.number_input("מחיר ב-€:", value=int(ext.get("price_eur", 250000) or 250000), step=5000)
-            m_built = st.number_input("שטח בנוי (מ\"ר):", value=int(ext.get("built_sqm", 100) or 100), step=5)
-            m_plot = st.number_input("שטח מגרש (מ\"ר):", value=int(ext.get("plot_sqm", 300) or 300), step=10)
+            m_built = st.number_input("שטח בנוי (מ\"ר):", value=int(ext.get("built_sqm", 0) or 0), step=5)
+            m_plot = st.number_input("שטח מגרש (מ\"ר):", value=int(ext.get("plot_sqm", 0) or 0), step=10)
         with mc2:
             m_region = st.text_input("אזור/אי:", value=ext.get("region", "כרתים"))
             m_city = st.text_input("עיר/מחוז:", value=ext.get("city_town", "חאניה"))
-            m_village = st.text_input("כפר/שכונה:", value=ext.get("village", "קליבס"))
-            m_bedrooms = st.number_input("חדרי שינה:", value=int(ext.get("bedrooms", 3) or 3), min_value=0)
+            m_village = st.text_input("כפר/שכונה:", value=ext.get("village", "אפוקורונס"))
+            m_bedrooms = st.number_input("חדרי שינה:", value=int(ext.get("bedrooms", 2) or 2), min_value=0)
             m_bathrooms = st.number_input("חדרי רחצה:", value=int(ext.get("bathrooms", 2) or 2), min_value=0)
         with mc3:
-            m_has_pool = st.checkbox("🏊‍♂️ בריכה פרטית", value=bool(ext.get("has_pool", True)))
+            m_has_pool = st.checkbox("🏊‍♂️ בריכה פרטית", value=bool(ext.get("has_pool", False)))
             m_sea_view = st.checkbox("🌊 נוף לים", value=bool(ext.get("sea_view", True)))
             m_phys = st.slider("ציון מצב פיזי (1-10):", 1.0, 10.0, float(ext.get("physical_score", 8.0) or 8.0), 0.5)
             m_loc = st.slider("ציון מיקום (1-10):", 1.0, 10.0, float(ext.get("location_score", 8.0) or 8.0), 0.5)
             m_airbnb = st.slider("ציון פוטנציאל Airbnb (1-10):", 1.0, 10.0, float(ext.get("airbnb_score", 8.0) or 8.0), 0.5)
 
-        m_summary = st.text_area("תקציר/הערות נוספות (בעברית):", value=ext.get("summary", property_text[:300] if property_text else "נכס שמור מהזנה ידנית."))
+        m_summary = st.text_area("תקציר/הערות נוספות:", value=ext.get("summary", property_text[:300] if property_text else "נכס שמור מהזנה ידנית."))
         submit_manual = st.form_submit_button("💾 שמור נכס בלוח המשפחתי")
 
         if submit_manual:

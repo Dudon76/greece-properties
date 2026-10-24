@@ -7,6 +7,7 @@ import requests
 import streamlit as st
 import pandas as pd
 from PIL import Image
+from datetime import datetime
 import google.generativeai as genai
 
 # ==========================================
@@ -49,6 +50,17 @@ def load_data():
             file_data = base64.b64decode(content["content"]).decode("utf-8")
             st.session_state["file_sha"] = content["sha"]
             parsed_json = json.loads(file_data)
+            
+            # בדיקת השלמת תאריכים רטרואקטיבית לנכסים ישנים
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            updated = False
+            if isinstance(parsed_json, list):
+                for item in parsed_json:
+                    if "created_at" not in item or not item["created_at"]:
+                        item["created_at"] = today_str
+                        updated = True
+                if updated:
+                    save_data(parsed_json)
             return parsed_json if isinstance(parsed_json, list) else []
         else:
             return st.session_state.get("local_db", [])
@@ -189,7 +201,6 @@ def parse_text_locally(text, url=""):
     if not combined:
         return data
 
-    # 1. זיהוי כפר ספציפי וציון מיקום דינמי
     village_scores = {
         "kokkino chorio": ("קוקינו חוריו", 9.0),
         "kokkino": ("קוקינו חוריו", 9.0),
@@ -216,7 +227,6 @@ def parse_text_locally(text, url=""):
         data["village"] = "אפוקורונס"
         data["location_score"] = 7.5
 
-    # 2. חילוץ מחיר מדויק
     price_match = re.search(r'(?:€|EUR|\$)\s*([\d,]+)|([\d,]+)\s*(?:€|EUR|euros)', combined, re.IGNORECASE)
     if price_match:
         val = price_match.group(1) or price_match.group(2)
@@ -227,7 +237,6 @@ def parse_text_locally(text, url=""):
         except:
             pass
 
-    # 3. חילוץ חדרי שינה
     bed_match = re.search(r'(\d+)\s*(?:-|\s)*(?:bed|bedroom|bedrooms|חדרי שינה|חדרים)', combined, re.IGNORECASE)
     if bed_match:
         try:
@@ -235,7 +244,6 @@ def parse_text_locally(text, url=""):
         except:
             pass
 
-    # 4. חילוץ חדרי רחצה
     bath_match = re.search(r'(\d+)\s*(?:-|\s)*(?:bath|bathroom|bathrooms|חדרי רחצה)', combined, re.IGNORECASE)
     if bath_match:
         try:
@@ -243,7 +251,6 @@ def parse_text_locally(text, url=""):
         except:
             pass
 
-    # 5. חילוץ שטח בנוי בלבד
     built_match = re.search(r'(\d+)\s*(?:sqm|sq\.m|m2|מ"ר|מטר בנוי)', combined, re.IGNORECASE)
     if built_match:
         try:
@@ -251,7 +258,6 @@ def parse_text_locally(text, url=""):
         except:
             pass
 
-    # 6. חילוץ שטח מגרש (רק אם מופיעה מילת Plot/Land/Garden מפורשת)
     plot_match = re.search(r'(?:plot|land|garden|lot)\s*(?:of)?\s*(\d+)|(\d+)\s*(?:sqm|m2)\s*(?:plot|land|garden|lot)', combined, re.IGNORECASE)
     if plot_match:
         try:
@@ -260,15 +266,13 @@ def parse_text_locally(text, url=""):
         except:
             pass
     else:
-        data["plot_sqm"] = 0  # נשאר 0 להזנה ידנית אם אין אזכור מגרש מפורש!
+        data["plot_sqm"] = 0
 
-    # 7. חילוץ בריכה ונוף לים
     if re.search(r'pool|בריכה|swimming', combined, re.IGNORECASE):
         data["has_pool"] = True
     if re.search(r'sea\s*view|sea\s*views|נוף\s*לים|panoramic\s*view', combined, re.IGNORECASE):
         data["sea_view"] = True
 
-    # 8. חישוב ציונים פיזי ו-Airbnb דינמיים לפי פרמטרים
     phys_score = 7.0
     airbnb_score = 7.0
 
@@ -411,10 +415,13 @@ with st.expander("➕ הוספת נכס חדש (אוטומטי או ידני)", 
             with st.spinner("מנוע ה-AI מנתח את הנתונים ושומר באופן קבוע..."):
                 parsed_data = analyze_with_gemini_with_fallback(user_text=property_text, image_files=uploaded_images)
                 
+                today_str = datetime.now().strftime("%Y-%m-%d")
+                
                 if parsed_data is not None:
                     current_props = load_data()
                     parsed_data["id"] = len(current_props) + 1 if current_props else 1
                     parsed_data["added_by"] = added_by
+                    parsed_data["created_at"] = today_str
                     parsed_data["url"] = property_url.strip() if property_url and property_url.strip() != "" else "N/A"
                     
                     current_props.append(parsed_data)
@@ -453,6 +460,8 @@ if st.session_state.get("show_manual_add", False):
     if not ext:
         ext = parse_text_locally(property_text, property_url)
 
+    today_default = datetime.now().strftime("%Y-%m-%d")
+
     with st.form(key="manual_add_form"):
         mc1, mc2, mc3 = st.columns(3)
         with mc1:
@@ -467,6 +476,7 @@ if st.session_state.get("show_manual_add", False):
             m_village = st.text_input("כפר/שכונה:", value=ext.get("village", "אפוקורונס"))
             m_bedrooms = st.number_input("חדרי שינה:", value=int(ext.get("bedrooms", 2) or 2), min_value=0)
             m_bathrooms = st.number_input("חדרי רחצה:", value=int(ext.get("bathrooms", 2) or 2), min_value=0)
+            m_created_at = st.text_input("📅 תאריך הכנסת המודעה (YYYY-MM-DD):", value=ext.get("created_at", today_default))
         with mc3:
             m_has_pool = st.checkbox("🏊‍♂️ בריכה פרטית", value=bool(ext.get("has_pool", False)))
             m_sea_view = st.checkbox("🌊 נוף לים", value=bool(ext.get("sea_view", True)))
@@ -495,6 +505,7 @@ if st.session_state.get("show_manual_add", False):
                 "airbnb_score": m_airbnb,
                 "summary": m_summary,
                 "added_by": added_by,
+                "created_at": m_created_at.strip(),
                 "url": m_url.strip() if m_url and m_url.strip() != "" else "N/A"
             }
             
@@ -553,7 +564,7 @@ else:
     df_all.to_excel(excel_file, index=False)
     with open(excel_file, "rb") as f:
         st.download_button(
-            label="📥 הורד טבלה מעודכנת לקובץ Excel (כולל סיווג וחישובי תשואה)",
+            label="📥 הורד טבלה מעודכנת לקובץ Excel (כולל סיווג, תאריכים וחישובי תשואה)",
             data=f,
             file_name="Greece_Properties_Comparison.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -562,6 +573,7 @@ else:
     def render_property_card(row, is_target=True):
         fin = calculate_financials(row)
         prop_id = row.get("id")
+        created_date = row.get("created_at", "N/A")
         
         with st.container(border=True):
             col1, col2, col3, col4 = st.columns([3, 2.5, 2.5, 1.2])
@@ -574,7 +586,7 @@ else:
                 st.write(f"📝 **תקציר:** {row.get('summary', '')}")
                 if not is_target and row.get('unmet_reasons'):
                     st.warning("❌ **סיבות לחוסר התאמה:** " + ", ".join(row.get('unmet_reasons')))
-                st.write(f"👤 **התווסף ע\"י:** {row.get('added_by', '')}")
+                st.write(f"👤 **התווסף ע\"י:** {row.get('added_by', '')} | 📅 **בתאריך:** {created_date}")
                 
             with col2:
                 price = row.get('price_eur', 0)
@@ -607,7 +619,7 @@ else:
                     st.warning("הנכס נמחק.")
                     st.rerun()
 
-            with st.expander(f"✏️ ערוך/עדכן נתונים עבור נכס #{prop_id}"):
+            with st.expander(f"✏️ ערוך/עדכן נתונים (כולל תאריך) עבור נכס #{prop_id}"):
                 with st.form(key=f"edit_form_{prop_id}"):
                     ec1, ec2, ec3 = st.columns(3)
                     with ec1:
@@ -621,9 +633,10 @@ else:
                         e_village = st.text_input("כפר/שכונה:", value=str(row.get('village', '')))
                         e_bedrooms = st.number_input("חדרי שינה:", value=int(row.get('bedrooms', 0) or 0), min_value=0)
                         e_bathrooms = st.number_input("חדרי רחצה:", value=int(row.get('bathrooms', 0) or 0), min_value=0)
+                        e_created_at = st.text_input("📅 תאריך הכנסת המודעה (YYYY-MM-DD):", value=str(row.get('created_at', created_date)))
+                    with ec3:
                         e_sea_view = st.checkbox("🌊 נוף לים", value=bool(row.get('sea_view', False)))
                         e_has_pool = st.checkbox("🏊‍♂️ בריכה", value=bool(row.get('has_pool', False)))
-                    with ec3:
                         e_phys = st.slider("ציון פיזי (1-10):", 1.0, 10.0, float(row.get('physical_score', 5.0) or 5.0), 0.1)
                         e_loc = st.slider("ציון מיקום (1-10):", 1.0, 10.0, float(row.get('location_score', 5.0) or 5.0), 0.1)
                         e_airbnb = st.slider("ציון Airbnb (1-10):", 1.0, 10.0, float(row.get('airbnb_score', 5.0) or 5.0), 0.1)
@@ -645,6 +658,7 @@ else:
                                 p["village"] = e_village
                                 p["bedrooms"] = e_bedrooms
                                 p["bathrooms"] = e_bathrooms
+                                p["created_at"] = e_created_at.strip()
                                 p["sea_view"] = e_sea_view
                                 p["has_pool"] = e_has_pool
                                 p["physical_score"] = round(e_phys, 1)
@@ -655,7 +669,7 @@ else:
                         
                         save_data(all_props)
                         st.session_state.properties = all_props
-                        st.success("הנכס עודכן והסיווג חושב מחדש!")
+                        st.success("הנכס עודכן והתאריך נשמר!")
                         st.rerun()
 
     # --- הצגת רשימת המיקוד ---
